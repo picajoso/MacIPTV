@@ -1,0 +1,7 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="demo.nature" group-title="Demostración" tvg-name="Naturaleza · Demo",Naturaleza · Demo
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8
+#EXTINF:-1 tvg-id="demo.news" group-title="Demostración" tvg-name="Noticias · Demo",Noticias · Demo
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8
+#EXTINF:-1 tvg-id="demo.cinema" group-title="Cine de prueba" tvg-name="Cine · Demo",Cine · Demo
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8
