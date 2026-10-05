@@ -1,6 +1,6 @@
 import Foundation
 
-/// Registro local acotado. Solo acepta etapas fijas y errores redactados;
+/// Registro local acotado. Solo acepta etapas/eventos fijos, métricas tipadas y errores redactados;
 /// nunca guarda URLs, nombres de canales ni configuraciones de proveedor.
 public enum DiagnosticLog {
     public enum Stage: String { case playlist, playback }
@@ -16,6 +16,18 @@ public enum DiagnosticLog {
     }
     public static func record(_ event: PlaybackEvent) {
         append(ISO8601DateFormatter().string(from: Date()) + " playback " + event.rawValue)
+    }
+    public static func record(_ snapshot: PlaybackSnapshot) {
+        append(ISO8601DateFormatter().string(from: Date()) + " playback " + snapshot.summary)
+    }
+    public static func recordMediaReason(_ reason: MediaFailureReason) {
+        append(ISO8601DateFormatter().string(from: Date()) + " playback mediaReason=" + reason.rawValue)
+    }
+    public static func recordHLS(kind: HLSRelayRegistry.Kind, status: Int, bytes: Int, elapsed: Double, manifest: HLSManifestSummary? = nil) {
+        let seconds = elapsed.isFinite ? String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), elapsed) : "unknown"
+        var line = ISO8601DateFormatter().string(from: Date()) + " hls resource=\(kind.rawValue) HTTP=\(status) bytes=\(bytes) elapsed=\(seconds)"
+        if let manifest { line += " " + manifest.summary }
+        append(line)
     }
     private static func append(_ line: String) {
         lock.lock()

@@ -110,3 +110,42 @@ PlaybackRecoveryTests añade cinco casos de regresión: congelación, pausa/rean
 scripts/recovery-smoke.swift compila junto al PlayerView de producción y los objetos de MacIPTVCore. Aloja la vista SwiftUI en una ventana invisible con HLS público de Apple, espera más de tres segundos de avance e induce una congelación pausando AVPlayer sin cambiar el estado de pausa voluntaria. Resultado observado: se sustituye el elemento detenido y la reproducción vuelve a avanzar más de tres segundos. El diagnóstico registra started → stalled → reconnecting → started → recovered. No lee el llavero ni sustituye la fuente del usuario.
 
 El paquete release 0.1.4 (build 5) está firmado localmente y el ZIP es íntegro. La prueba del proveedor real durante varios minutos queda pendiente: el control nativo informó que el Mac estaba bloqueado. La reconexión está verificada, pero no se afirma haber corregido la causa externa de los errores HLS.
+
+# Actualización 0.1.5: causa de los cortes de unos 30 segundos
+
+Investigación del 5 de octubre de 2026. Los logs de 0.1.4 muestran varias conexiones de 31–32 segundos, seguidas de CoreMedia -12660, un evento de fin/fallo y reconexión. El fallo precede al watchdog; no lo provoca el límite de reintentos. La notificación de fallo al final contiene un error que la implementación anterior no conservaba: NSURLErrorDomain=-1102 con CoreMediaErrorDomain=-12660. El registro de AVPlayer identifica HTTP 403 Forbidden.
+
+## Comparación controlada con el proveedor
+
+Se utilizó la fuente del llavero sin imprimir ni persistir credenciales. Cada ensayo se ejecutó por separado, sin otro canal activo en la app. Los probes temporales quedaron fuera del repositorio. Solo se emitieron códigos, tiempos, contadores y alias temporales.
+
+| Ensayo | Resultado |
+| --- | --- |
+| AVPlayer aislado con URL de entrada y perfil VLC, sin lógica de MacIPTV | Vídeo hasta ~32 segundos; HTTP 403, posición detenida. La petición fallida también devolvió 403 al comprobarla por HTTP. |
+| Descarga periódica de la lista HLS resuelta con URLSession | HTTP 200 durante un minuto; secuencia avanza, cinco segmentos de 10 segundos, sin ENDLIST. |
+| AVPlayer con dirección final tras redirección | Nuevo corte; no basta resolver la redirección. |
+| AVPlayer con renovación paralela cada 5 segundos | La lista sigue con HTTP 200, pero la reproducción se corta; tampoco basta un heartbeat. |
+| Relay local de diagnóstico que conserva las URIs cambiantes | Listas y segmentos HTTP 200, pero AVPlayer se detiene con CoreMedia -12312. Corregir solo los rechazos HTTP no basta. |
+| Comparación de manifestaciones sucesivas | Para una misma secuencia cambian las URLs autorizadas completas. El nombre del segmento permanece estable; al desplazarse la ventana, los segmentos comunes se mueven exactamente lo declarado por MEDIA-SEQUENCE. |
+| Relay de diagnóstico con identidades locales estables y destinos autorizados actualizados | 180 segundos de vídeo continuo, nuevos segmentos y fotogramas, cero bloqueos. |
+| PlayerView de producción + HLSRelay Swift | 180 segundos continuos, 179 fotogramas nuevos comprobados, avance de ~180 segundos y el mismo AVPlayerItem, sin reconexiones. |
+
+## Causa y corrección
+
+El servidor renueva las URLs firmadas de segmentos que siguen siendo los mismos. AVPlayer espera que un número de secuencia siga identificando la misma URI entre renovaciones. RFC 8216, sección 6.3.4, recomienda detener la reproducción si esa correspondencia cambia: https://www.rfc-editor.org/rfc/rfc8216.html#section-6.3.4 . La salida HLS observada no mantiene esa propiedad. El contenido sí continúa disponible; no se ha observado un límite de reproducción de 30 segundos ni un corte de conectividad general.
+
+La ventana inicial tiene cinco segmentos de diez segundos y AVPlayer empieza cerca del directo, aproximadamente en el segundo 20 de esa ventana. Quedan unos 30 segundos iniciales que puede consumir antes de necesitar continuar con las URIs renovadas. Esto explica la periodicidad del fallo. La incompatibilidad estaba en usar directamente esa salida HLS del proveedor, sin adaptar su renovación de tokens; aumentar reintentos no la resolvía.
+
+HLSRelay utiliza Network y URLSession, solo en 127.0.0.1 con puerto dinámico y prefijo UUID. HLSRelayRegistry asigna una URL local estable por lista y número de secuencia y actualiza en memoria el destino autorizado cuando vuelve a descargar el manifiesto. Resuelve las URLs relativas contra la respuesta final y adapta atributos URI de recursos referenciados. Reutiliza la sesión final del proveedor. No hay Python ni servicio remoto en la app y no se transcodifica el vídeo. Se conserva HTTPS con validación normal y el perfil HTTP de vídeo comprobado.
+
+La adaptación se activa únicamente en rutas Xtream HLS reconocidas, conservando las credenciales percent-encoded al detectar la ruta. El HLS ordinario y la demo mantienen el camino directo. Las conexiones y el estado del relay se cancelan antes de abrir la siguiente fuente, y se retiran al cerrar la vista. El registro limita el historial de destinos y nunca los persiste.
+
+## Diagnóstico y verificación final
+
+PlaybackSnapshot registra cada cinco segundos y en los eventos relevantes: sesión aleatoria, tiempo transcurrido, posición, duración finita o unknown, rate, estado de elemento/transporte, motivo de espera, búfer disponible, ventana buscable, peticiones de medios, bytes, bitrate, bloqueos y fotogramas descartados. El relay registra tipo de recurso, HTTP, bytes, tiempo y resumen numérico del manifiesto. Los comentarios de error se clasifican en valores fijos; no se imprimen textos libres, URIs, tokens, nombres de canales o credenciales.
+
+Suite completa: 79 tests, cero fallos. Nuevas regresiones de tokens cambiantes con identidad estable, desplazamiento de ventana, recursos relativos/URI entre comillas, separación de listas, privacidad del resumen y reconocimiento de rutas con credenciales codificadas. El parser HLS trata CRLF/BOM. Compilación release de 0.1.5 (build 6) y firma ad hoc verificadas; ZIP íntegro.
+
+El paquete final se abrió con la fuente guardada y el canal de la captura. Tras más de dos minutos seguía con rate=1, transport=playing, nuevas peticiones HTTP 200 y cero bloqueos.
+
+La prueba prolongada valida el canal utilizado y la adaptación de esta salida HLS. No garantiza disponibilidad del proveedor, compatibilidad de todos sus códecs ni reproducción continua indefinida. Los logs y credenciales de los probes no se publican.

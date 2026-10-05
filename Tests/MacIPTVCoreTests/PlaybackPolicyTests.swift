@@ -18,4 +18,13 @@ final class PlaybackPolicyTests: XCTestCase {
             XCTAssertEqual(PlaybackPolicy.nativeURL(for: url), url)
         }
     }
+    func testRelayPreservesEncodedCredentialPathAndOnlyAdaptsXtream() throws {
+        for raw in ["http://example.test/live/u/p/42.m3u8", "https://example.test/panel/live/User/P%26%2Fword/42.m3u8"] {
+            XCTAssertTrue(PlaybackPolicy.needsHLSRelay(for: try XCTUnwrap(URL(string: raw))))
+        }
+        for raw in ["http://example.test/live/u/p/42.ts", "https://example.test/other/master.m3u8", "http://example.test/live/u/p/name.m3u8"] {
+            XCTAssertFalse(PlaybackPolicy.needsHLSRelay(for: try XCTUnwrap(URL(string: raw))))
+        }
+    }
+
 }

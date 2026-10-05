@@ -8,6 +8,19 @@ public enum PlaybackPolicy {
     /// al video. Perfil de lista comprobado por separado del de reproduccion.
     public static let playlistUserAgent = "MacIPTV/1.0"
 
+    /// Adapt only recognized Xtream live HLS URLs. Public/ordinary HLS keeps
+    /// the direct AVFoundation path; credentials remain inside the relay actor.
+    public static func needsHLSRelay(for url: URL) -> Bool {
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count >= 5, parts[parts.count - 4] == "live",
+              !parts[parts.count - 3].isEmpty, !parts[parts.count - 2].isEmpty,
+              let file = parts.last, file.lowercased().hasSuffix(".m3u8") else { return false }
+        let id = file.dropLast(5)
+        return !id.isEmpty && id.utf8.allSatisfy { $0 >= 48 && $0 <= 57 }
+    }
+
     /// Xtream publica TS y HLS bajo la misma ruta de canal. AVKit utiliza HLS;
     /// la URL original se conserva en Channel para otros reproductores.
     public static func nativeURL(for url: URL) -> URL {

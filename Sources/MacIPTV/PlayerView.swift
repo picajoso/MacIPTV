@@ -30,6 +30,11 @@ struct PlayerView: View {
     @State private var reconnectTask: Task<Void, Never>?
     @State private var notifications: [NSObjectProtocol] = []
     @State private var isBuffering = false
+    @State private var sessionID = UUID()
+    @State private var startedAt = 0.0
+    @State private var relay: HLSRelay?
+    @State private var connectionTask: Task<Void, Never>?
+    @State private var relayCleanup: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -132,6 +137,13 @@ struct PlayerView: View {
     }
 
     private func cleanObservers() {
+        connectionTask?.cancel()
+        connectionTask = nil
+        if let previousRelay = relay {
+            let previousCleanup = relayCleanup
+            relayCleanup = Task { await previousCleanup?.value; await previousRelay.stop() }
+            relay = nil
+        }
         watchdog?.cancel()
         watchdog = nil
         reconnectTask?.cancel()
@@ -162,11 +174,38 @@ struct PlayerView: View {
             return
         }
         status = .loading
+        sessionID = UUID()
+        startedAt = ProcessInfo.processInfo.systemUptime
         DiagnosticLog.record(.started)
         isPaused = false
         player.volume = Float(volume)
         player.isMuted = isMuted
-        let asset = AVURLAsset(url: PlaybackPolicy.nativeURL(for: url),
+        let nativeURL = PlaybackPolicy.nativeURL(for: url)
+        if PlaybackPolicy.needsHLSRelay(for: nativeURL) {
+            let adapter = HLSRelay()
+            relay = adapter
+            let cleanup = relayCleanup
+            connectionTask = Task { @MainActor in
+                await cleanup?.value
+                guard generation == self.generation, !Task.isCancelled else { return }
+                do {
+                    let localURL = try await adapter.start(upstream: nativeURL)
+                    guard generation == self.generation, !Task.isCancelled else { await adapter.stop(); return }
+                    self.configurePlayer(url: localURL, generation: generation, isReconnect: !resetRecovery)
+                } catch {
+                    await adapter.stop()
+                    guard generation == self.generation, !Task.isCancelled else { return }
+                    DiagnosticLog.record(.playback, error: error)
+                    self.status = .failed(ErrorDiagnostics.summary(error))
+                }
+            }
+        } else {
+            configurePlayer(url: nativeURL, generation: generation, isReconnect: !resetRecovery)
+        }
+    }
+
+    private func configurePlayer(url: URL, generation: Int, isReconnect: Bool) {
+        let asset = AVURLAsset(url: url,
                                options: [AVURLAssetHTTPUserAgentKey: PlaybackPolicy.userAgent])
         let item = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: item)
@@ -177,6 +216,7 @@ struct PlayerView: View {
                 case .failed:
                     self.handleInterruption(item, generation: generation)
                 case .readyToPlay:
+                    self.snapshot(item, trigger: .ready)
                     self.status = .playing
                 default:
                     break
@@ -186,23 +226,31 @@ struct PlayerView: View {
         for name in [AVPlayerItem.playbackStalledNotification,
                      AVPlayerItem.failedToPlayToEndTimeNotification,
                      AVPlayerItem.didPlayToEndTimeNotification,
-                     AVPlayerItem.newErrorLogEntryNotification] {
-            let token = NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { _ in
+                     AVPlayerItem.newErrorLogEntryNotification, AVPlayerItem.newAccessLogEntryNotification] {
+            let token = NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { notification in
                 guard generation == self.generation, self.player.currentItem === item else { return }
-                if name == AVPlayerItem.newErrorLogEntryNotification {
+                if name == AVPlayerItem.newAccessLogEntryNotification {
+                    self.snapshot(item, trigger: .access)
+                } else if name == AVPlayerItem.newErrorLogEntryNotification {
                     self.logMediaError(item)
                 } else if name == AVPlayerItem.playbackStalledNotification {
                     DiagnosticLog.record(.stalled)
+                    self.snapshot(item, trigger: .stalled)
                     self.isBuffering = !self.isPaused
                 } else {
                     DiagnosticLog.record(.ended)
+                    self.snapshot(item, trigger: .ended)
+                    if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError {
+                        DiagnosticLog.record(.playback, error: error)
+                    }
                     self.handleInterruption(item, generation: generation)
                 }
             }
             notifications.append(token)
         }
         watchdog = Task { @MainActor in
-            var reportedRecovery = resetRecovery
+            var reportedRecovery = !isReconnect
+            var ticks = 0
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
                 guard generation == self.generation, self.player.currentItem === item else { return }
@@ -210,6 +258,8 @@ struct PlayerView: View {
                     DiagnosticLog.record(.recovered)
                     reportedRecovery = true
                 }
+                ticks += 1
+                if ticks % 5 == 0 { self.snapshot(item, trigger: .periodic) }
                 let stalled = self.recovery.sample(now: ProcessInfo.processInfo.systemUptime,
                     position: self.player.currentTime().seconds, paused: self.isPaused)
                 self.isBuffering = !self.isPaused && self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -223,8 +273,29 @@ struct PlayerView: View {
         player.play()
     }
 
+    private func snapshot(_ item: AVPlayerItem, trigger: PlaybackSnapshot.Trigger) {
+        let position = player.currentTime().seconds
+        let ahead = item.loadedTimeRanges.map { $0.timeRangeValue }.map { $0.end.seconds - position }.max() ?? 0
+        let ranges = item.seekableTimeRanges.map { $0.timeRangeValue }
+        let event = item.accessLog()?.events.last
+        let transport: PlaybackSnapshot.Transport = player.timeControlStatus == .playing ? .playing : (player.timeControlStatus == .paused ? .paused : .waiting)
+        let reason = player.reasonForWaitingToPlay
+        let wait: PlaybackSnapshot.Wait = reason == nil ? .none : (reason == .toMinimizeStalls ? .buffer : (reason == .evaluatingBufferingRate ? .evaluate : (reason == .noItemToPlay ? .noItem : .other)))
+        DiagnosticLog.record(PlaybackSnapshot(trigger: trigger, session: sessionID,
+            elapsed: ProcessInfo.processInfo.systemUptime - startedAt, position: position,
+            duration: item.duration.seconds, rate: player.rate, itemStatus: item.status.rawValue,
+            transport: transport, wait: wait, bufferedAhead: max(0, ahead),
+            seekableStart: ranges.first?.start.seconds ?? .nan, seekableEnd: ranges.last?.end.seconds ?? .nan,
+            bufferEmpty: item.isPlaybackBufferEmpty, likelyToKeepUp: item.isPlaybackLikelyToKeepUp,
+            mediaRequests: event?.numberOfMediaRequests ?? 0, stalls: event?.numberOfStalls ?? 0,
+            bytes: event?.numberOfBytesTransferred ?? 0, observedBitrate: event?.observedBitrate ?? 0,
+            indicatedBitrate: event?.indicatedBitrate ?? 0, droppedFrames: event?.numberOfDroppedVideoFrames ?? 0))
+    }
+
     private func logMediaError(_ item: AVPlayerItem) {
+        snapshot(item, trigger: .mediaError)
         if let event = item.errorLog()?.events.last {
+            DiagnosticLog.recordMediaReason(.classify(event.errorComment))
             DiagnosticLog.record(.playback, error: NSError(domain: event.errorDomain, code: event.errorStatusCode))
         }
     }
@@ -232,6 +303,7 @@ struct PlayerView: View {
     private func handleInterruption(_ item: AVPlayerItem, generation: Int) {
         guard generation == self.generation, reconnectTask == nil,
               player.currentItem === item, !isPaused else { return }
+        snapshot(item, trigger: .failed)
         if let error = item.error { DiagnosticLog.record(.playback, error: error) }
         logMediaError(item)
         watchdog?.cancel()
@@ -245,7 +317,7 @@ struct PlayerView: View {
             DiagnosticLog.record(.exhausted)
             isBuffering = false
             status = .failed("La emisión se ha detenido y no se ha recuperado tras tres reconexiones. " +
-                (item.error.map(ErrorDiagnostics.summary) ?? "El canal ha dejado de enviar vídeo."))
+                (item.error.map(ErrorDiagnostics.summary) ?? "El reproductor ha interrumpido la emisión. Consulta el diagnóstico para conocer el motivo."))
             return
         }
         DiagnosticLog.record(.reconnecting)

@@ -85,6 +85,7 @@ public enum ErrorDiagnostics {
             switch code {
             case -12752: return "flujo de medios invalido"
             case -12753: return "formato de muestra no soportado"
+            case -12660: return "HTTP 403: recurso rechazado"
             case -12743: return "dato no soportado"
             case -12744: return "buffer insuficiente"
             default: return "error de medios"

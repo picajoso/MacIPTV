@@ -27,7 +27,7 @@ Puedes probar la interfaz con el modo demostración, que utiliza programación f
 
 ## Reproducción
 
-El reproductor integrado usa AVFoundation con una superficie AVPlayerLayer y controles propios. Desde 0.1.1, reconoce las URLs MPEG-TS de Xtream (`/live/usuario/clave/ID.ts`) y solicita su variante HLS (`.m3u8`) para reproducirlas dentro de la app. Usa un perfil HTTP compatible con VLC para servidores que rechazan agentes genéricos. La lista y la URL original se conservan. Servidores sin variante HLS y otros códecs pueden necesitar VLC/IINA. La guía aparece cuando XMLTV entrega identificadores coincidentes.
+El reproductor integrado usa AVFoundation con una superficie AVPlayerLayer y controles propios. Desde 0.1.1, reconoce las URLs MPEG-TS de Xtream (`/live/usuario/clave/ID.ts`) y solicita su variante HLS (`.m3u8`) para reproducirlas dentro de la app. Usa un perfil HTTP compatible con VLC para servidores que rechazan agentes genéricos. Desde 0.1.5, un adaptador HLS nativo local mantiene estable la identidad de cada segmento y actualiza sus tokens cuando el proveedor renueva las URLs. El adaptador solo escucha en 127.0.0.1, usa rutas opacas y mantiene las URLs autorizadas en memoria. No requiere Python ni un servicio externo. La lista y la URL original se conservan. Servidores sin variante HLS y otros códecs pueden necesitar VLC/IINA. La guía aparece cuando XMLTV entrega identificadores coincidentes.
 
 Esta versión se centra en televisión en directo, grupos, búsqueda, favoritos y guía. No incluye grabación, catálogo VOD, catch-up ni DRM.
 
@@ -48,9 +48,9 @@ Al recompilar con firma ad hoc, macOS puede considerar que la aplicación ha cam
 
 ## Diagnóstico
 
-La versión 0.1.4 detecta las emisiones detenidas y realiza hasta tres reconexiones automáticas, con esperas de 2, 4 y 8 segundos. Un vídeo que no avanza durante 15 segundos activa la recuperación; pausar voluntariamente no reconecta. Tras un minuto de reproducción continua se restablece el límite. Incluye los controles propios de 0.1.3 y la corrección ATS para listas HTTP. Al actualizar, cierra y vuelve a abrir la app.
+La versión 0.1.5 corrige los cortes repetidos de unos 30 segundos causados por URLs de segmentos HLS con tokens que cambian entre renovaciones. Conserva el diagnóstico detallado y la recuperación de 0.1.4, que detecta las emisiones detenidas y realiza hasta tres reconexiones automáticas, con esperas de 2, 4 y 8 segundos. Un vídeo que no avanza durante 15 segundos activa la recuperación; pausar voluntariamente no reconecta. Tras un minuto de reproducción continua se restablece el límite. Incluye los controles propios de 0.1.3 y la corrección ATS para listas HTTP. Al actualizar, cierra y vuelve a abrir la app.
 
-Los errores muestran dominio, código y categoría de red/reproducción. El menú «… → Abrir diagnostico» abre `~/Library/Logs/MacIPTV/diagnostics.log`. El archivo mantiene las últimas 200 entradas y no contiene URLs, rutas de canales, credenciales ni descripciones arbitrarias del servidor.
+Los errores muestran dominio, código y categoría de red/reproducción. El diagnóstico también registra cada cinco segundos el avance, el búfer y las métricas del reproductor, junto con códigos HTTP, duración y secuencia de las listas HLS. El menú «… → Abrir diagnostico» abre `~/Library/Logs/MacIPTV/diagnostics.log`. El archivo mantiene las últimas 200 entradas y no contiene URLs, rutas de canales, credenciales ni descripciones arbitrarias del servidor.
 
 La dirección Xtream debe escribirse con `http://` o `https://`, incluyendo los dos puntos, o como un nombre de servidor sin esquema. Las variantes mal escritas como `http//` se rechazan antes de conectar.
 
