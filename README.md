@@ -31,10 +31,16 @@ El reproductor integrado usa AVFoundation con una superficie AVPlayerLayer y con
 
 Esta versión se centra en televisión en directo, grupos, búsqueda, favoritos y guía. No incluye grabación, catálogo VOD, catch-up ni DRM.
 
+## Novedades de 0.2.0
+
+Recientes conserva los últimos 20 canales, sin duplicados. El botón «Canal anterior» alterna entre los dos últimos canales seleccionados. Favoritos conserva su orden: clic derecho en un favorito y «Subir favorito» o «Bajar favorito». El historial y el orden se guardan localmente como identificadores; la demo no modifica las preferencias de la suscripción.
+
 ## Controles
 
-Selecciona un grupo y pulsa un canal para reproducirlo. La estrella añade o quita favoritos. El botón Guía muestra la programación del grupo seleccionado; pulsa una fila para ver ese canal. La barra inferior del reproductor permite pausar, silenciar, ajustar el volumen y activar la pantalla completa.
+Selecciona un grupo y pulsa un canal para reproducirlo. La estrella añade o quita favoritos. El botón Guía muestra la programación del grupo seleccionado; pulsa una fila para ver ese canal. La barra inferior del reproductor permite pausar, silenciar, ajustar el volumen y activar la pantalla completa. Se oculta tras tres segundos sin mover el puntero; vuelve al moverlo y permanece visible durante la pausa o el búfer. Al cambiar de canal aparece brevemente su nombre y programa actual.
 
+- `⌥⌘↓` / `⌥⌘↑`: canal siguiente / previo en la lista visible.
+- `⌥⌘←`: volver al canal anterior.
 - `⌘F`: pantalla completa.
 - `⌘R`: actualizar la fuente guardada.
 - `⌘,`: configuración del proveedor.

@@ -14,6 +14,15 @@ struct MacIPTVApp: App {
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
+            CommandMenu("Canales") {
+                Button("Canal siguiente") { store.moveSelection(by: 1) }
+                    .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                Button("Canal previo en la lista") { store.moveSelection(by: -1) }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                Button("Volver al canal anterior") { store.returnToPreviousChannel() }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                    .disabled(store.previousChannelID == nil)
+            }
             CommandGroup(after: .newItem) {
                 Button("Fuente del proveedor...") { store.showSettings = true }
                     .keyboardShortcut(",", modifiers: .command)

@@ -149,3 +149,13 @@ Suite completa: 79 tests, cero fallos. Nuevas regresiones de tokens cambiantes c
 El paquete final se abrió con la fuente guardada y el canal de la captura. Tras más de dos minutos seguía con rate=1, transport=playing, nuevas peticiones HTTP 200 y cero bloqueos.
 
 La prueba prolongada valida el canal utilizado y la adaptación de esta salida HLS. No garantiza disponibilidad del proveedor, compatibilidad de todos sus códecs ni reproducción continua indefinida. Los logs y credenciales de los probes no se publican.
+
+
+## 0.2.0 (build 7) — 5 de octubre de 2026
+
+- Suite final: 79 tests, cero fallos. Build de depuración y release correctos; bundle con versión 0.2.0/build 7 y firma ad hoc verificada por build-app.sh.
+- scripts/store-smoke/main.swift: filtros, ida/vuelta entre los dos últimos canales, selección repetida, orden de favoritos, búsqueda en recientes, límite de 20 entradas y zapping estable con el historial reordenándose. Prueba aislada de UserDefaults: migración de favoritos antiguos y restauración del historial/orden en un nuevo AppStore. Demo sin escrituras en las preferencias reales.
+- scripts/recovery-smoke.swift con PlayerView modificado: se provocó una detención sin pausa voluntaria; el reproductor sustituyó el elemento y volvió a avanzar. PASS.
+- Interfaz del bundle: panel Recientes y botón Canal anterior visibles; ⌥⌘↓ cambió entre dos canales reales y ⌥⌘← regresó al primero. Captura con vídeo visible y controles ocultos tras inactividad. El acceso por AX a las filas laterales no confirmó su activación; la derivación de Recientes se verificó mediante la prueba de AppStore.
+- La sesión real posterior al zapping alcanzó 108 segundos transcurridos, posición 126.68, rate=1, transport=playing y stalls=0. No se modificaron el transporte HLS ni el watchdog. Esta comprobación es breve y no constituye una garantía para todos los canales.
+- Controles visibles en pausa, búfer o VoiceOver; las pulsaciones en el reproductor y el movimiento del puntero los revelan. No capturan clics ni aparecen en accesibilidad mientras están ocultos.

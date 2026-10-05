@@ -35,6 +35,8 @@ struct PlayerView: View {
     @State private var relay: HLSRelay?
     @State private var connectionTask: Task<Void, Never>?
     @State private var relayCleanup: Task<Void, Never>?
+    @State private var controlsVisible = true
+    @State private var hideControlsTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -46,7 +48,13 @@ struct PlayerView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if status == .playing { playbackControls }
+            if status == .playing {
+                playbackControls
+                    .opacity(controlsVisible ? 1 : 0)
+                    // Los controles ocultos no capturan clics ni voz.
+                    .allowsHitTesting(controlsVisible)
+                    .accessibilityHidden(!controlsVisible)
+            }
         }
         .overlay {
             if status == .loading || isBuffering {
@@ -60,8 +68,56 @@ struct PlayerView: View {
         // a la vez cuando cambian su id y su URL en el mismo render.
         .onChange(of: channel) { _, _ in start() }
         .onChange(of: retryCounter.count) { _, _ in start() }
+        // Los cambios de estado reprograman o fijan la visibilidad sin
+        // necesidad de mover el puntero (p. ej. inicio de recuperacion).
+        .onChange(of: status) { _, _ in scheduleHideControls() }
+        .onChange(of: isPaused) { _, _ in scheduleHideControls() }
+        .onChange(of: isBuffering) { _, _ in scheduleHideControls() }
+        // El movimiento continuo del puntero revela los controles; al
+        // detenerse se reprograma el ocultado de tres segundos.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                showControls()
+                scheduleHideControls()
+            case .ended:
+                scheduleHideControls()
+            }
+        }
+        .onKeyPress { _ in
+            showControls()
+            scheduleHideControls()
+            return .ignored
+        }
         .onAppear { start() }
-        .onDisappear { stop() }
+        .onDisappear {
+            stop()
+            hideControlsTask?.cancel()
+            hideControlsTask = nil
+        }
+    }
+
+    private func showControls() {
+        hideControlsTask?.cancel()
+        hideControlsTask = nil
+        guard !controlsVisible else { return }
+        controlsVisible = true
+    }
+
+    /// Aplaza el ocultado tres segundos durante reproduccion sin pausar ni
+    /// recuperar emision; en cualquier otro estado los controles quedan fijos.
+    private func scheduleHideControls() {
+        hideControlsTask?.cancel()
+        hideControlsTask = nil
+        guard status == .playing, !isPaused, !isBuffering, !NSWorkspace.shared.isVoiceOverEnabled else {
+            controlsVisible = true
+            return
+        }
+        hideControlsTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            hideControlsTask = nil
+            controlsVisible = false
+        }
     }
 
     private var playbackControls: some View {
@@ -69,7 +125,13 @@ struct PlayerView: View {
             Button {
                 isPaused.toggle()
                 recovery.resetProgress()
-                if isPaused { player.pause() } else { player.play() }
+                if isPaused {
+                    player.pause()
+                    scheduleHideControls()
+                } else {
+                    player.play()
+                    scheduleHideControls()
+                }
             } label: {
                 Image(systemName: isPaused ? "play.fill" : "pause.fill")
             }

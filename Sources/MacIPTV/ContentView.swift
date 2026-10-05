@@ -5,6 +5,7 @@ import MacIPTVCore
 /// Dispositivo persistente de tres paneles: grupos, canales y reproductor/guia.
 struct ContentView: View {
     @Environment(AppStore.self) private var store
+    @State private var bannerVisible = false
 
     var body: some View {
         @Bindable var store = store
@@ -68,6 +69,12 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .tag(Optional<String>("__favoritos"))
             }
+            Section {
+                Button { store.selectedGroup = "__recientes" } label: {
+                    Label("Recientes", systemImage: "clock")
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).tag(Optional<String>("__recientes"))
+            }
             if !store.groups.isEmpty {
                 Section("Grupos") {
                     ForEach(store.groups, id: \.self) { group in
@@ -98,6 +105,25 @@ struct ContentView: View {
 
     @ViewBuilder private var playerPane: some View {
         PlayerView(channel: store.selectedChannel)
+            .overlay(alignment: .topLeading) {
+                if bannerVisible, let channel = store.selectedChannel {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(channel.name).font(.headline)
+                        if let programme = store.nowPlaying(channel) {
+                            Text(programme.title).font(.subheadline)
+                        }
+                    }
+                    .padding(12)
+                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(16)
+                    .allowsHitTesting(false)
+                }
+            }
+            .task(id: store.selectedChannelID) {
+                bannerVisible = store.selectedChannelID != nil
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                bannerVisible = false
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .focusable()
             .onMoveCommand { direction in
@@ -134,6 +160,11 @@ struct ContentView: View {
 
     @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
+            Button { store.returnToPreviousChannel() } label: {
+                Label("Canal anterior", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(store.previousChannelID == nil)
+            .help("Volver al canal anterior (⌥⌘←)")
             Button {
                 store.showGuide.toggle()
             } label: {
@@ -238,6 +269,14 @@ struct ChannelListView: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Favorito")
+                }
+                .contextMenu {
+                    if store.favorites.contains(channel.id) {
+                        Button("Subir favorito") { store.moveFavorite(channel.id, by: -1) }
+                            .disabled(store.favoriteOrder.first == channel.id)
+                        Button("Bajar favorito") { store.moveFavorite(channel.id, by: 1) }
+                            .disabled(store.favoriteOrder.last == channel.id)
+                    }
                 }
                 .listRowBackground(store.selectedChannelID == channel.id
                                    ? Color.accentColor.opacity(0.25) : Color.clear)

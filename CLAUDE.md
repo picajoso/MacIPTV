@@ -110,15 +110,21 @@ Las versiones 0.1–0.1.4 se desarrollaron el 4 de octubre de 2026; 0.1.5, el 5 
 | **0.1.2** | Corrección del error ATS `-1022` al importar Xtream HTTP: eliminación de la combinación conflictiva de claves de Info.plist. Verificación con peticiones dentro de un bundle firmado, no solo desde CLI. 57 tests. |
 | **0.1.3** | El cierre al cambiar de canal apuntaba a Binding de SwiftUI dentro de los controles AVKit. Se sustituyeron por controles propios y una superficie AVPlayerLayer persistente. 57 tests; prueba de 20 cambios de elemento con fotograma posterior 1080p y vídeo visible en la app. |
 | **0.1.4** | El usuario informó de vídeo detenido tras unos segundos; el diagnóstico mostraba `-1008`/CoreMedia `-16849`. Se añadió vigilancia del avance, eventos de reproducción y recuperación automática acotada. 62 tests y prueba con PlayerView real que congela el elemento, verifica su sustitución y la reanudación. |
-
 | **0.1.5** | Investigación del corte de ~30 segundos con AVPlayer aislado, redirección resuelta, renovación paralela y relay de diagnóstico. Se identificaron URIs que cambian para la misma secuencia de segmentos. Se incorporó un adaptador Swift local que mantiene identidades estables y renueva los destinos autorizados; diagnóstico periódico y por petición HTTP. La evidencia final de reproducción continua está en `docs/validation.md`. |
+
+| **0.2.0** | Zapping por teclado, canal anterior, recientes, favoritos ordenables y controles que se ocultan automáticamente. |
 
 ## Estado y trabajo pendiente
 
-La versión vigente es **0.1.5, build 6**. La suite completa tiene 79 tests pasando, incluidas las regresiones de diagnóstico HLS, identidad estable de segmentos y credenciales codificadas. PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
+La versión vigente es **0.2.0, build 7**. La suite completa tiene 79 tests pasando, incluidas las regresiones de diagnóstico HLS, identidad estable de segmentos y credenciales codificadas. En la validación de 0.1.5, PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
 
 El corte periódico de 0.1.4 se ha reproducido y se ha identificado la incompatibilidad de las URIs de segmentos HLS renovadas. La reproducción continua con el proveedor y el adaptador se documenta en la validación de 0.1.5. Esto no implica compatibilidad universal ni una garantía frente a futuros cortes de red o del proveedor.
 
 La firma es ad hoc, sin notarización ni distribución universal. Una recompilación puede cambiar la identidad que macOS reconoce para el llavero; conserva el flujo explícito de autorización.
 
 Al mantener el proyecto: reproduce los fallos antes de cambiar el reproductor, añade pruebas de regresión relevantes, verifica los bundles para cambios de ATS/firma y distingue entre resultados del núcleo, pruebas de reproducción e interacción nativa. No presentes una comprobación breve como garantía de reproducción continua.
+
+
+### Versión 0.2.0 — navegación y controles
+
+Añade menú Canales con atajos ⌥⌘↑/↓ y ⌥⌘←, botón de canal anterior, lista Recientes de hasta 20 identificadores únicos y favoritos ordenables mediante menú contextual. AppStore conserva el historial y el orden en UserDefaults; el modo demo opera en memoria. La lista de recientes mantiene una instantánea durante el zapping para evitar que su reordenación cambie el siguiente destino. PlayerView incorpora ocultación de controles sin sustituir AVPlayer ni cambiar HLSRelay, PlaybackRecovery o la conexión de vídeo. La implementación se coordinó con un subagente llamacpp/qwen3.8-flash-next para los controles.

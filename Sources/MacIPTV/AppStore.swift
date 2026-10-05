@@ -12,10 +12,23 @@ final class AppStore {
     var isImporting = false
     var sourceSummary: String?
     var demoMode = false
-    var selectedChannelID: String?
-    var searchText = ""
+    var selectedChannelID: String? {
+        didSet {
+            guard let id = selectedChannelID, id != oldValue else { return }
+            previousChannelID = oldValue
+            recentIDs.removeAll { $0 == id }
+            recentIDs.insert(id, at: 0)
+            recentIDs = Array(recentIDs.prefix(20))
+            persistNavigation()
+        }
+    }
+    var previousChannelID: String?
+    var recentIDs: [String] = []
+    var favoriteOrder: [String] = []
+    var searchText = "" { didSet { recentNavigationIDs = nil } }
     /// Centinela visible: una fila con tag nil no puede seleccionarse en List.
-    var selectedGroup: String? = "__todos"
+    var selectedGroup: String? = "__todos" { didSet { recentNavigationIDs = nil } }
+    private var recentNavigationIDs: [String]?
     var favorites: Set<String> = []
     var showGuide = false
     var showSettings = false
@@ -23,6 +36,12 @@ final class AppStore {
     private let keychain = KeychainSourceRepository()
     private let importer = SourceImporter()
     private let defaultsKey = "favorites.ids"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        restoreFavorites()
+    }
 
     /// Generacion de importacion: un resultado tardio nunca pisa una fuente
     /// mas nueva, una eliminacion ni el modo demo.
@@ -51,15 +70,41 @@ final class AppStore {
 
     func toggleFavorite(_ id: String) {
         if favorites.contains(id) { favorites.remove(id) } else { favorites.insert(id) }
+        if favorites.contains(id) { favoriteOrder.append(id) }
+        else { favoriteOrder.removeAll { $0 == id } }
+        persistNavigation()
         // En demo los favoritos son solo de esta sesion.
         if !demoMode {
-            UserDefaults.standard.set(Array(favorites), forKey: defaultsKey)
+            defaults.set(Array(favorites), forKey: defaultsKey)
         }
     }
 
+    private func persistNavigation() {
+        guard !demoMode else { return }
+        defaults.set(favoriteOrder, forKey: "favorites.order")
+        defaults.set(recentIDs, forKey: "channels.recent")
+    }
+
+    func moveFavorite(_ id: String, by delta: Int) {
+        guard let index = favoriteOrder.firstIndex(of: id) else { return }
+        let target = index + delta
+        guard favoriteOrder.indices.contains(target) else { return }
+        favoriteOrder.swapAt(index, target)
+        persistNavigation()
+    }
+
+    func returnToPreviousChannel() {
+        guard let id = previousChannelID, channels.contains(where: { $0.id == id }) else { return }
+        selectedChannelID = id
+    }
+
     private func restoreFavorites() {
-        if let ids = UserDefaults.standard.stringArray(forKey: defaultsKey) {
+        recentIDs = Array((defaults.stringArray(forKey: "channels.recent") ?? []).prefix(20))
+        if let ids = defaults.stringArray(forKey: defaultsKey) {
             favorites = Set(ids)
+            favoriteOrder = defaults.stringArray(forKey: "favorites.order") ?? ids
+            favoriteOrder = favoriteOrder.filter { favorites.contains($0) }
+            favoriteOrder.append(contentsOf: ids.filter { !favoriteOrder.contains($0) })
         }
     }
 
@@ -130,13 +175,18 @@ final class AppStore {
     }
 
     private func apply(_ outcome: ImportOutcome) {
+        recentNavigationIDs = nil
         channels = outcome.channels
         guide = outcome.guide
         guideWarning = outcome.guideWarning
         let live = Set(outcome.channels.map(\.id))
         favorites.formIntersection(live)
+        favoriteOrder.removeAll { !live.contains($0) }
+        recentIDs.removeAll { !live.contains($0) }
+        if let previous = previousChannelID, !live.contains(previous) { previousChannelID = nil }
+        persistNavigation()
         if !demoMode {
-            UserDefaults.standard.set(Array(favorites), forKey: defaultsKey)
+            defaults.set(Array(favorites), forKey: defaultsKey)
         }
         if let selected = selectedChannelID, !live.contains(selected) {
             selectedChannelID = nil
@@ -161,8 +211,12 @@ final class AppStore {
                 self.selectedChannelID = nil
                 self.demoMode = false
                 self.favorites = []
+                self.favoriteOrder = []
+                self.recentIDs = []
+                self.previousChannelID = nil
+                self.persistNavigation()
                 self.selectedGroup = "__todos"
-                UserDefaults.standard.removeObject(forKey: self.defaultsKey)
+                defaults.removeObject(forKey: self.defaultsKey)
             } catch {
                 guard !Task.isCancelled, generation == self.importGeneration else { return }
                 self.lastError = (error as? LocalizedError)?.errorDescription ?? "No se pudo quitar la fuente."
@@ -182,7 +236,12 @@ final class AppStore {
 
     /// Sube o baja la seleccion dentro de la lista visible (teclado).
     func moveSelection(by delta: Int) {
-        let list = visibleChannels
+        var list = visibleChannels
+        if selectedGroup == "__recientes" {
+            if recentNavigationIDs == nil { recentNavigationIDs = list.map(\.id) }
+            let lookup = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            list = (recentNavigationIDs ?? []).compactMap { lookup[$0] }
+        }
         guard !list.isEmpty else { return }
         if let idx = list.firstIndex(where: { $0.id == selectedChannelID }) {
             selectedChannelID = list[min(max(idx + delta, 0), list.count - 1)].id
@@ -199,7 +258,11 @@ final class AppStore {
         guide = DemoContent.makeGuide()
         sourceSummary = "Modo demostracion"
         favorites = []
+        favoriteOrder = []
+        recentIDs = []
+        previousChannelID = nil
         selectedChannelID = nil
+        selectedGroup = "__todos"
     }
 
     // MARK: Listas derivadas
@@ -212,7 +275,11 @@ final class AppStore {
     var visibleChannels: [Channel] {
         var list: [Channel]
         if selectedGroup == "__favoritos" {
-            list = channels.filter { favorites.contains($0.id) }
+            let lookup = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            list = favoriteOrder.compactMap { lookup[$0] }
+        } else if selectedGroup == "__recientes" {
+            let lookup = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            list = recentIDs.compactMap { lookup[$0] }
         } else if let group = selectedGroup, group != "__todos" {
             list = channels.filter { $0.group == group }
         } else {
