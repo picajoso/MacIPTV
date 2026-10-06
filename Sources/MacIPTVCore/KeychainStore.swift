@@ -22,8 +22,9 @@ public struct KeychainSourceStore: Sendable {
     /// Actualizacion atomica: primero SecItemUpdate; solo se anade si no
     /// existia. Nunca se borra lo anterior antes de guardar, asi una falla
     /// no destruye la fuente guardada previa.
-    public func save(_ source: SourceConfiguration) throws {
-        let data = try JSONEncoder().encode(source)
+    public func save(_ source: SourceConfiguration) throws { try save(SavedSource(source: source)) }
+    public func save(_ saved: SavedSource) throws {
+        let data = try JSONEncoder().encode(saved)
         let attributes = baseQuery(allowAuthentication: true)
         let update = SecItemUpdate(attributes as CFDictionary,
                                    [kSecValueData as String: data] as CFDictionary)
@@ -42,6 +43,9 @@ public struct KeychainSourceStore: Sendable {
     }
 
     public func load(allowAuthentication: Bool = false) throws -> SourceConfiguration? {
+        try loadSaved(allowAuthentication: allowAuthentication)?.source
+    }
+    public func loadSaved(allowAuthentication: Bool = false) throws -> SavedSource? {
         var query = baseQuery(allowAuthentication: allowAuthentication)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -52,7 +56,7 @@ public struct KeychainSourceStore: Sendable {
             throw IPTVError.keychain(detail: "no se pudo acceder a la fuente guardada (codigo \(status)). Revisa su permiso en Acceso a Llaveros")
         }
         guard let data = item as? Data,
-              let source = try? JSONDecoder().decode(SourceConfiguration.self, from: data) else {
+              let source = try? SavedSource.decode(data) else {
             throw IPTVError.keychain(detail: "la configuracion guardada no se pudo leer")
         }
         return source
@@ -78,6 +82,14 @@ public actor KeychainSourceRepository {
     public func save(_ source: SourceConfiguration) throws {
         try Task.checkCancellation()
         try store.save(source)
+    }
+    public func loadSaved(allowAuthentication: Bool = false) throws -> SavedSource? {
+        try Task.checkCancellation()
+        return try store.loadSaved(allowAuthentication: allowAuthentication)
+    }
+    public func save(_ saved: SavedSource) throws {
+        try Task.checkCancellation()
+        try store.save(saved)
     }
     public func clear() throws { try store.clear() }
 }

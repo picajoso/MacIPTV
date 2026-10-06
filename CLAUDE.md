@@ -20,7 +20,7 @@ No había un repositorio Git local durante las versiones 0.1–0.1.4. El histori
 
 ## Arquitectura
 
-Swift Package Manager, sin dependencias externas declaradas. Se usa el compilador Swift 6 con modo de lenguaje Swift 5 para los targets. El empaquetado genera una aplicación AppKit/SwiftUI con firma local ad hoc.
+Swift Package Manager, sin dependencias externas declaradas. Se usa el compilador Swift 6 con modo de lenguaje Swift 5 para los targets. El empaquetado genera una aplicación AppKit/SwiftUI con App Sandbox, Hardened Runtime y firma local ad hoc gratuita.
 
 | Ruta | Responsabilidad |
 | --- | --- |
@@ -30,6 +30,11 @@ Swift Package Manager, sin dependencias externas declaradas. Se usa el compilado
 | `Sources/MacIPTVCore/` | Modelos, parsers, red, URLs Xtream, llavero, diagnósticos y políticas de reproducción. |
 | `Sources/MacIPTVCore/HLSRelay.swift` | Adaptador HTTP nativo limitado a loopback con URLs privadas solo en memoria. |
 | `Sources/MacIPTVCore/HLSRelayRegistry.swift` | Identidades locales estables por lista y secuencia; destinos autorizados actualizados. |
+| `Sources/MacIPTVCore/NetworkPolicy.swift` | Consentimiento HTTP por fuente y comprobación de destinos y redirecciones; excepciones solo IP/puerto. |
+| `Sources/MacIPTVCore/SecureHTTPClient.swift` | Sesiones efímeras y descargas limitadas durante la recepción. |
+| `Sources/MacIPTVCore/NetworkGateway.swift` | SOCKS5 local autenticado, conexión a IP comprobadas y cierre de sockets. |
+| `Sources/MacIPTVCore/DNSResolver.swift` | Plazos y cancelación del solicitante; máximo global de cuatro workers de resolución. |
+| `Sources/MacIPTVCore/SavedSource.swift` | Fuente, permisos de red y bookmark de solo lectura persistidos en el llavero; migración sin consentimientos implícitos. |
 | `Tests/MacIPTVCoreTests/` | Pruebas del núcleo independientes de la interfaz. |
 | `Examples/demo.m3u` | Lista ficticia con un recurso público. |
 | `scripts/` | Empaquetado, icono, proveedor sintético y pruebas de integración/reproducción. |
@@ -43,9 +48,9 @@ M3U y XMLTV se analizan en el núcleo. Los canales tienen identificadores establ
 
 - Se usa AVFoundation con un AVPlayerLayer alojado en NSView. No se usan SwiftUI VideoPlayer ni los controles internos de AVPlayerView, que provocaron cierres en el entorno probado.
 - PlaybackPolicy transforma solamente rutas Xtream conocidas `/live/usuario/clave/ID.ts` a su equivalente `.m3u8`. Conserva prefijos, parámetros y credenciales codificadas. La URL original y el ID del canal permanecen intactos. Se requiere que el proveedor sirva la variante HLS; no es soporte general de MPEG-TS directo.
-- Desde 0.1.5 se adapta el HLS de las rutas Xtream conocidas mediante HLSRelay. Las URLs de un mismo segmento rotaban sus tokens en cada renovación; AVPlayer interrumpía la reproducción al cambiar las URIs para una misma secuencia. El relay mantiene una identidad local por lista/secuencia y actualiza el destino autorizado. Escucha solo en 127.0.0.1 con un puerto dinámico y rutas UUID; no es un proxy abierto. No requiere Python, VLC ni un backend remoto. URLSession es efímero, sin caché en disco, y conserva la validación HTTPS. El HLS ordinario y la demo siguen con AVPlayer directo.
+- Desde 0.1.5 se adapta el HLS mediante HLSRelay. Las URLs de un mismo segmento rotaban sus tokens en cada renovación; AVPlayer interrumpía la reproducción al cambiar las URIs para una misma secuencia. El relay mantiene una identidad local por lista/secuencia y actualiza el destino autorizado. Escucha solo en 127.0.0.1 con un puerto dinámico y rutas UUID; no es un proxy abierto. Desde 0.3.0, toda reproducción integrada, incluido HLS público y demo, pasa por el relay y el transporte protegido. No requiere Python, VLC ni un backend remoto. URLSession es efímero, sin caché en disco, y conserva la validación HTTPS. El reproductor integrado requiere HLS; MP4 directo, DRM y content steering necesitan un reproductor externo.
 - Las listas usan `MacIPTV/1.0` y el vídeo `VLC/3.0.21 LibVLC/3.0.21`. Estos perfiles se verificaron por separado: el proveedor probado rechazaba el agente de vídeo para listas y el agente de listas para vídeo. No los unifiques sin una prueba real.
-- Info.plist mantiene `NSAllowsArbitraryLoads=true` para proveedores HTTP configurables. No añadas `NSAllowsArbitraryLoadsForMedia` junto a esa clave: esa combinación provocó el bloqueo ATS de URLSession. HTTPS mantiene la validación de certificados.
+- Info.plist mantiene `NSAllowsArbitraryLoads=true` para proveedores HTTP configurables; NetworkPolicy exige consentimiento explícito por fuente antes de usar HTTP y bloquea redirecciones HTTPS→HTTP. Xtream sin esquema usa HTTPS. No añadas `NSAllowsArbitraryLoadsForMedia` junto a esa clave: esa combinación provocó el bloqueo ATS de URLSession. HTTPS mantiene la validación de certificados.
 - PlaybackRecovery detecta 15 segundos sin avance usando un reloj monotónico. Los errores y el fin de emisión también activan recuperación. Se desconecta el elemento anterior antes de reconectar; hay hasta tres intentos con esperas de 2, 4 y 8 segundos. Un minuto de progreso continuo restablece el presupuesto. La pausa voluntaria no debe reconectar.
 - Al cambiar de canal o cerrar la vista se cancelan tareas y observadores. Los callbacks validan tanto la generación como el elemento activo. Evita abrir dos conexiones por un único cambio de canal.
 
@@ -53,9 +58,13 @@ M3U y XMLTV se analizan en el núcleo. Los canales tienen identificadores establ
 
 La configuración del proveedor se guarda en el Llavero mediante KeychainSourceStore y un actor KeychainSourceRepository. Las llamadas síncronas de Security se realizan fuera del hilo principal. El arranque consulta sin autenticación interactiva; el usuario puede solicitarla mediante «Autorizar llavero». Guardar actualiza antes de intentar crear una entrada; no borra primero una fuente válida.
 
+SavedSource conserva también el consentimiento HTTP, las excepciones de IP/puerto y el bookmark del archivo elegido por NSOpenPanel. Las fuentes antiguas no reciben consentimiento HTTP automático; una lista local antigua puede necesitar seleccionarse de nuevo con «Elegir». Los bookmarks solo conceden lectura. Antes de transferir una URL a VLC/IINA se muestra un aviso: puede contener credenciales, y las conexiones del reproductor externo no pasan por las protecciones de MacIPTV.
+
 Los favoritos usan UserDefaults. El modo demo no debe sobrescribir la fuente ni los favoritos persistentes. Las conexiones van directamente al proveedor; no hay backend intermediario ni telemetría propia.
 
 DiagnosticLog conserva un máximo de 200 entradas en `~/Library/Logs/MacIPTV/diagnostics.log`. Solo admite eventos fijos, resúmenes de error redactados y métricas numéricas/tipadas del reproductor y de las peticiones HLS. Nunca registres URLs de reproducción, listas del proveedor, usuarios, contraseñas ni descripciones arbitrarias de errores: pueden contener secretos. ErrorDiagnostics restringe los dominios, conserva códigos numéricos y controla errores anidados y ciclos.
+
+Con App Sandbox, Library y UserDefaults se resuelven dentro del container de la aplicación; usa «Abrir diagnostico» para localizar el log efectivo. No presupongas que la ruta anterior fuera del container sigue siendo la utilizada.
 
 No subas configuración personal, listas reales, capturas del usuario, logs, llavero ni credenciales al repositorio. Los datos de autenticación usados en tests son ficticios. `.build/`, `dist/`, logs y cachés quedan excluidos por `.gitignore`.
 
@@ -69,7 +78,7 @@ bash scripts/build-app.sh
 open dist/MacIPTV.app
 ```
 
-El script genera `dist/MacIPTV.app` y `dist/MacIPTV.zip`, configura las cachés del compilador, crea el icono y verifica la firma ad hoc. La versión y el número de compilación se definen en `scripts/Info.plist`. Los artefactos se generan localmente y no se incluyen en Git.
+El script genera `dist/MacIPTV.app`, `dist/MacIPTV.zip` y su checksum `dist/MacIPTV.zip.sha256`, configura las cachés del compilador, crea el icono y verifica la firma ad hoc con runtime y `scripts/MacIPTV.entitlements`. La versión y el número de compilación se definen en `scripts/Info.plist`. Los artefactos se generan localmente y no se incluyen en Git. No se requiere Developer ID para estas protecciones; la firma local y el checksum no acreditan la identidad del editor ni sustituyen notarización.
 
 Si el entorno restringe las cachés predeterminadas:
 
@@ -89,7 +98,7 @@ swift scripts/check-channel-switches.swift
 La prueba de recuperación utiliza PlayerView de producción en una ventana invisible. Después de compilar los tests, en el entorno Apple Silicon documentado:
 
 ```sh
-swiftc -swift-version 5 -module-cache-path "$PWD/.build/clang-cache" \
+swiftc -target arm64-apple-macosx14.0 -swift-version 5 -module-cache-path "$PWD/.build/clang-cache" \
   -I .build/arm64-apple-macosx/debug/Modules \
   Sources/MacIPTV/PlayerView.swift scripts/recovery-smoke.swift \
   .build/arm64-apple-macosx/debug/MacIPTVCore.build/*.swift.o \
@@ -98,6 +107,8 @@ swiftc -swift-version 5 -module-cache-path "$PWD/.build/clang-cache" \
 ```
 
 Las rutas de objetos cambian en Intel. `scripts/fixture-server.py` ofrece un proveedor sintético local para las pruebas de importación; `scripts/import-smoke/` y `scripts/store-smoke/` son harnesses auxiliares, no targets ejecutables declarados en Package.swift.
+
+Una prueba CLI sin firma no verifica App Sandbox. Para comprobar aislamiento y permisos, empaqueta los ensayos `scripts/security-sandbox-smoke.swift` y `scripts/security-bookmark-smoke.swift` con los entitlements y runtime de producción y un bundle ID de prueba, sin consultar la fuente personal. Sus rutas de archivo sintético deben adaptarse al checkout usado. Los resultados y límites están en `docs/validation.md` y `docs/security-review-2026-10-06.md`.
 
 ## Evolución de versiones
 
@@ -111,12 +122,13 @@ Las versiones 0.1–0.1.4 se desarrollaron el 4 de octubre de 2026; 0.1.5, el 5 
 | **0.1.3** | El cierre al cambiar de canal apuntaba a Binding de SwiftUI dentro de los controles AVKit. Se sustituyeron por controles propios y una superficie AVPlayerLayer persistente. 57 tests; prueba de 20 cambios de elemento con fotograma posterior 1080p y vídeo visible en la app. |
 | **0.1.4** | El usuario informó de vídeo detenido tras unos segundos; el diagnóstico mostraba `-1008`/CoreMedia `-16849`. Se añadió vigilancia del avance, eventos de reproducción y recuperación automática acotada. 62 tests y prueba con PlayerView real que congela el elemento, verifica su sustitución y la reanudación. |
 | **0.1.5** | Investigación del corte de ~30 segundos con AVPlayer aislado, redirección resuelta, renovación paralela y relay de diagnóstico. Se identificaron URIs que cambian para la misma secuencia de segmentos. Se incorporó un adaptador Swift local que mantiene identidades estables y renueva los destinos autorizados; diagnóstico periódico y por petición HTTP. La evidencia final de reproducción continua está en `docs/validation.md`. |
-
 | **0.2.0** | Zapping por teclado, canal anterior, recientes, favoritos ordenables y controles que se ocultan automáticamente. |
+| **0.2.1** | Conservación de variantes activas, rangos de bytes explícitos, reescritura transaccional y actualización periódica del programa actual. 83 tests y regresión visual con programación sintética. |
+| **0.3.0** | Transporte protegido, permisos por fuente, límites de recursos, rechazo de entidades XML, sandbox/runtime y archivos de solo lectura. 120 tests; comprobaciones firmadas de aislamiento, bookmarks, HTTPS y recuperación de vídeo público. |
 
 ## Estado y trabajo pendiente
 
-La versión vigente es **0.2.0, build 7**. La suite completa tiene 79 tests pasando, incluidas las regresiones de diagnóstico HLS, identidad estable de segmentos y credenciales codificadas. En la validación de 0.1.5, PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
+La versión vigente es **0.3.0, build 9**. La suite completa tiene 120 tests pasando, incluidas las regresiones de seguridad, diagnóstico HLS, identidad estable de segmentos, credenciales codificadas, conservación de variantes activas y rangos de bytes explícitos. En la validación de 0.1.5, PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
 
 El corte periódico de 0.1.4 se ha reproducido y se ha identificado la incompatibilidad de las URIs de segmentos HLS renovadas. La reproducción continua con el proveedor y el adaptador se documenta en la validación de 0.1.5. Esto no implica compatibilidad universal ni una garantía frente a futuros cortes de red o del proveedor.
 
@@ -128,3 +140,16 @@ Al mantener el proyecto: reproduce los fallos antes de cambiar el reproductor, a
 ### Versión 0.2.0 — navegación y controles
 
 Añade menú Canales con atajos ⌥⌘↑/↓ y ⌥⌘←, botón de canal anterior, lista Recientes de hasta 20 identificadores únicos y favoritos ordenables mediante menú contextual. AppStore conserva el historial y el orden en UserDefaults; el modo demo opera en memoria. La lista de recientes mantiene una instantánea durante el zapping para evitar que su reordenación cambie el siguiente destino. PlayerView incorpora ocultación de controles sin sustituir AVPlayer ni cambiar HLSRelay, PlaybackRecovery o la conexión de vídeo. La implementación se coordinó con un subagente llamacpp/qwen3.8-flash-next para los controles.
+
+### Versión 0.2.1 — correcciones de relay y programa actual
+
+Cada actualización de una lista variante renueva su registro y su destino resuelto; no necesita que vuelva a descargarse la lista maestra para conservar la ruta local. Los segmentos antiguos siguen caducando. Una reescritura rechazada no cambia el registro: las mutaciones se confirman solo al completar el manifiesto. Antes de reescribir las URLs de segmentos, HLSRelayRegistry convierte los desplazamientos implícitos de EXT-X-BYTERANGE en explícitos y rechaza los que no tienen un rango anterior válido del mismo recurso o desbordan Int.
+
+ChannelListView y el panel de programa actual usan TimelineView cada 30 segundos, pasando su fecha a AppStore.nowPlaying. Esa actualización no recrea el reproductor. scripts/programme-refresh-smoke.swift comprueba ambos títulos mediante OCR del renderizado de una ventana invisible, con programación ficticia y sin conexión a proveedores ni acceso al llavero. Su cabecera contiene el comando de compilación.
+
+
+### Versión 0.3.0 — seguridad
+
+NetworkPolicy/SecureHTTPClient/NetworkGateway canalizan todas las descargas a través de un gateway SOCKS5 local autenticado con destinos IP comprobados y sin fallback directo. DNSResolver acota las llamadas de sistema y libera solicitantes cancelados. Toda reproducción nativa utiliza HLSRelay; no reintroducir AVURLAsset remoto sin mantener controles sobre todas las peticiones. Permisos HTTP y excepciones IP/puerto pertenecen a SavedSource, junto con el bookmark read-only, guardados en Keychain. Una URL del proveedor nunca concede permisos. Callbacks de consentimiento llevan sourceID y generación para descartar avisos antiguos. Los parsers y descargas tienen límites explícitos; DTD/entidades XML y sintaxis URI HLS ambigua se rechazan.
+
+scripts/build-app.sh firma gratuitamente con entitlements y --options runtime; no necesita Developer ID. Distribución no notarizada y sin identidad verificable del editor, decisión deliberada del usuario. La validación firmada, límites y riesgos residuales figuran en docs/security-review-2026-10-06.md y docs/validation.md.

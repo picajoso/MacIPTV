@@ -14,6 +14,8 @@ open dist/MacIPTV.app
 
 La aplicación queda en `dist/MacIPTV.app`. Puedes copiarla a Aplicaciones. La compilación local tiene firma ad hoc, sin notarización de Apple.
 
+La versión 0.3.0 incorpora App Sandbox y Hardened Runtime con firma local gratuita. No requiere Developer ID para compilar ni para activar esas protecciones. La firma local no acredita al editor y no evita los avisos de Gatekeeper al distribuirla. El empaquetado genera también `dist/MacIPTV.zip.sha256` para comprobar la integridad del ZIP.
+
 El paquete incluido se ha compilado para Apple Silicon. Para un Mac Intel, compila el proyecto en ese equipo.
 
 ## Conectar tu proveedor
@@ -23,6 +25,10 @@ Introduce los datos dentro de la aplicación. No hace falta compartir contraseñ
 - **M3U:** URL de la lista o archivo local; URL XMLTV opcional para la programación.
 - **Xtream:** dirección del servidor con puerto si procede, usuario y contraseña.
 
+Xtream usa HTTPS cuando no escribes el esquema. Un proveedor HTTP requiere marcar «Permitir HTTP sin cifrar para esta fuente» o autorizarlo al aparecer el aviso. Las fuentes antiguas no reciben ese permiso automáticamente. Las listas locales se seleccionan con «Elegir» y se recuerdan mediante permisos de solo lectura; una lista antigua puede necesitar seleccionarse de nuevo.
+
+Los destinos de tu ordenador y de redes privadas se bloquean por defecto, incluso si una URL pública resuelve a una IP interna. Para un servidor IPTV local, autoriza su IP y puerto concretos en Fuente y usa esa IP en las URLs. No se admiten excepciones basadas en nombres DNS.
+
 Puedes probar la interfaz con el modo demostración, que utiliza programación ficticia y un vídeo de prueba público de Apple. La compatibilidad de una suscripción real requiere comprobar sus canales.
 
 ## Reproducción
@@ -30,6 +36,8 @@ Puedes probar la interfaz con el modo demostración, que utiliza programación f
 El reproductor integrado usa AVFoundation con una superficie AVPlayerLayer y controles propios. Desde 0.1.1, reconoce las URLs MPEG-TS de Xtream (`/live/usuario/clave/ID.ts`) y solicita su variante HLS (`.m3u8`) para reproducirlas dentro de la app. Usa un perfil HTTP compatible con VLC para servidores que rechazan agentes genéricos. Desde 0.1.5, un adaptador HLS nativo local mantiene estable la identidad de cada segmento y actualiza sus tokens cuando el proveedor renueva las URLs. El adaptador solo escucha en 127.0.0.1, usa rutas opacas y mantiene las URLs autorizadas en memoria. No requiere Python ni un servicio externo. La lista y la URL original se conservan. Servidores sin variante HLS y otros códecs pueden necesitar VLC/IINA. La guía aparece cuando XMLTV entrega identificadores coincidentes.
 
 Esta versión se centra en televisión en directo, grupos, búsqueda, favoritos y guía. No incluye grabación, catálogo VOD, catch-up ni DRM.
+
+Desde 0.3.0, toda reproducción integrada pasa por el relay protegido y requiere HLS. URLs de MP4 u otros medios directos, DRM y selección dinámica de servidores HLS requieren un reproductor externo. Al abrir VLC/IINA, la app pide confirmación: recibirán la URL original, que puede contener credenciales, y sus conexiones quedan bajo sus propias protecciones.
 
 ## Novedades de 0.2.0
 
@@ -49,6 +57,8 @@ Selecciona un grupo y pulsa un canal para reproducirlo. La estrella añade o qui
 ## Privacidad
 
 La configuración que contiene credenciales se guarda en el Llavero de macOS. Las conexiones van directamente a tu proveedor; no hay un servicio intermediario ni telemetría propia. Las conexiones HTTP que algunos proveedores exigen no cifran el transporte; utiliza HTTPS cuando tu proveedor lo admita.
+
+La descarga valida destinos y redirecciones, conecta a las IP comprobadas y conserva la validación TLS normal. Las sesiones son efímeras. Existen límites de tamaño, concurrencia y tiempo para listas, guías y recursos HLS; XMLTV rechaza DTD y entidades externas. Los permisos de red locales no autorizan otros puertos ni alias DNS. Estas medidas reducen riesgos, pero no garantizan ausencia de vulnerabilidades.
 
 Al recompilar con firma ad hoc, macOS puede considerar que la aplicación ha cambiado y denegar el acceso a una fuente guardada anteriormente. El arranque no abre diálogos de autenticación ni bloquea la ventana. Si aparece ese error, pulsa «Autorizar llavero» y responde al diálogo de macOS. La consulta se realiza en segundo plano. Para el uso diario, conserva el mismo paquete de la aplicación.
 

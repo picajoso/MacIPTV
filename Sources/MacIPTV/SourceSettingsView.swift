@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import Darwin
 import MacIPTVCore
 
 /// Asistente para configurar la fuente: M3U (URL o archivo) o Xtream.
@@ -42,6 +43,16 @@ struct SourceSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Toggle("Permitir HTTP sin cifrar para esta fuente", isOn: $viewModel.allowHTTP)
+            if viewModel.allowHTTP {
+                Text("HTTP puede exponer tu suscripción a quien intercepte la conexión. Usa HTTPS si tu proveedor lo admite.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            TextField("URL con IP del servidor local autorizado (opcional)", text: $viewModel.localServer)
+                .textFieldStyle(.roundedBorder)
+            Text("Déjalo vacío para bloquear accesos a otros servicios de tu ordenador y tu red. Autoriza solo tu servidor IPTV local.")
+                .font(.caption).foregroundStyle(.secondary)
 
             if let error = viewModel.validationError {
                 Label(error, systemImage: "exclamationmark.triangle")
@@ -100,6 +111,10 @@ final class SourceFormModel: ObservableObject {
     @Published var xtreamPass = ""
     @Published var validationError: String?
     @Published var loading = false
+    @Published var allowHTTP = false
+    @Published var localServer = ""
+    private var fileBookmark: Data?
+    private var bookmarkedPath: String?
 
     func pickFile() {
         let panel = NSOpenPanel()
@@ -107,7 +122,11 @@ final class SourceFormModel: ObservableObject {
         panel.allowsOtherFileTypes = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            m3uPath = url.path
+            do {
+                fileBookmark = try SavedSource.bookmark(for: url)
+                bookmarkedPath = url.path
+                m3uPath = url.path
+            } catch { validationError = "No se pudo autorizar el archivo seleccionado." }
         }
     }
 
@@ -138,6 +157,10 @@ final class SourceFormModel: ObservableObject {
                 validationError = "Elige un archivo de lista."
                 return false
             }
+            guard fileBookmark != nil, trimmed == bookmarkedPath else {
+                validationError = "Usa Elegir para autorizar el acceso al archivo de lista."
+                return false
+            }
             source = .m3uFile(path: trimmed, xmltvURL: optional(xmltvURL))
         case .xtream:
             let base = xtreamBase.trimmingCharacters(in: .whitespaces)
@@ -158,9 +181,21 @@ final class SourceFormModel: ObservableObject {
             }
             source = .xtream(baseURL: base, username: xtreamUser, password: xtreamPass)
         }
+        var policy = NetworkPolicy(allowHTTP: allowHTTP)
+        if let local = optional(localServer) {
+            do {
+                let url = try XtreamEndpoints.validatedBaseURL(local)
+                guard let host = url.host, NetworkPolicy.isPublicAddress(host) || isLocalIPLiteral(host),
+                      let port = UInt16(exactly: url.port ?? (url.scheme == "http" ? 80 : 443)), port > 0 else {
+                    validationError = "Autoriza una IP concreta y su puerto, por ejemplo http://192.168.1.10:8080."
+                    return false
+                }
+                policy.localEndpoints.insert(NetworkPolicy.endpointKey(host: host, port: port))
+            } catch { validationError = "La URL del servidor local no es válida."; return false }
+        }
         loading = true
         validationError = nil
-        store.load(source)
+        store.load(source, policy: policy, fileBookmark: kind == .m3uFile ? fileBookmark : nil)
         // La pantalla se cierra; el estado y los errores se ven en la ventana.
         return true
     }
@@ -168,5 +203,11 @@ final class SourceFormModel: ObservableObject {
     private func optional(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? nil : t
+    }
+
+    private func isLocalIPLiteral(_ host: String) -> Bool {
+        let address = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        var v4 = in_addr(); var v6 = in6_addr()
+        return inet_pton(AF_INET, address, &v4) == 1 || inet_pton(AF_INET6, address, &v6) == 1
     }
 }

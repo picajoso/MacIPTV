@@ -1,7 +1,7 @@
 import Foundation
 
 public enum XtreamEndpoints {
-    /// Valida la direccion base. Anade esquema http por defecto SOLO si el
+    /// Valida la direccion base. Anade esquema https por defecto SOLO si el
     /// texto no trae ninguno; un esquema explicito debe ser http o https.
     public static func validatedBaseURL(_ raw: String) throws -> URL {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -13,7 +13,7 @@ public enum XtreamEndpoints {
             throw IPTVError.invalidURL(reason: "usa http:// o https://, incluyendo los dos puntos")
         }
         let hasExplicitScheme = trimmed.lowercased().contains("://")
-        let candidate = hasExplicitScheme ? trimmed : "http://" + trimmed
+        let candidate = hasExplicitScheme ? trimmed : "https://" + trimmed
         guard var comps = URLComponents(string: candidate) else {
             throw IPTVError.invalidURL(reason: "no se puede analizar")
         }

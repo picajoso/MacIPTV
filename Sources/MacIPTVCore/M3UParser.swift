@@ -12,7 +12,12 @@ public struct M3UParseResult: Sendable {
 public enum M3UParser {
     /// Analiza una lista M3U/M3U8 extendida.
     /// - base: URL de la lista, para resolver URLs relativas de stream.
+    /// Rechaza toda la fuente con canales vacíos y skippedCount >= 1 si
+    /// supera 8 MiB UTF-8, una línea física de 16 KiB o 50 000 canales únicos.
     public static func parse(_ text: String, baseURL: URL?) -> M3UParseResult {
+        guard ParserLimits.acceptsM3U(text) else {
+            return M3UParseResult(channels: [], skippedCount: 1)
+        }
         var normalized = text
         if normalized.hasPrefix("\u{FEFF}") { normalized.removeFirst() }
         normalized = normalized.replacingOccurrences(of: "\r\n", with: "\n")
@@ -24,7 +29,13 @@ public enum M3UParser {
         var order = 0
         var pending: PendingEntry?
 
-        for rawLine in normalized.components(separatedBy: "\n") {
+        // Consume one line at a time: millions of empty lines must not create
+        // a proportional array of String objects before the channel limit.
+        var lineStart = normalized.startIndex
+        while lineStart < normalized.endIndex {
+            let lineEnd = normalized[lineStart...].firstIndex(of: "\n") ?? normalized.endIndex
+            let rawLine = normalized[lineStart..<lineEnd]
+            lineStart = lineEnd == normalized.endIndex ? lineEnd : normalized.index(after: lineEnd)
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
 
@@ -58,6 +69,9 @@ public enum M3UParser {
             guard !emittedIDs.contains(id) else {
                 pending = nil
                 continue
+            }
+            guard channels.count < ParserLimits.m3uChannels else {
+                return M3UParseResult(channels: [], skippedCount: max(1, skipped))
             }
             emittedIDs.insert(id)
             channels.append(Channel(

@@ -74,7 +74,7 @@ final class ImporterTests: XCTestCase {
                                   datas: ["http://list.tv/xmltv.php": guideXML])
         let importer = SourceImporter(fetcher: fetcher)
         let out = try await importer.importSource(.m3uURL(url: "http://list.tv/p.m3u",
-                                                          xmltvURL: "http://list.tv/xmltv.php"))
+                                                          xmltvURL: "http://list.tv/xmltv.php"), policy: NetworkPolicy(allowHTTP: true))
         XCTAssertEqual(out.channels.count, 1)
         XCTAssertEqual(out.guide?.programmes(for: "a").count, 1)
         XCTAssertNil(out.guideWarning)
@@ -84,7 +84,7 @@ final class ImporterTests: XCTestCase {
         let fetcher = StubFetcher(texts: ["http://list.tv/p.m3u": "#EXTM3U\n"])
         let importer = SourceImporter(fetcher: fetcher)
         do {
-            _ = try await importer.importSource(.m3uURL(url: "http://list.tv/p.m3u", xmltvURL: nil))
+            _ = try await importer.importSource(.m3uURL(url: "http://list.tv/p.m3u", xmltvURL: nil), policy: NetworkPolicy(allowHTTP: true))
             XCTFail("deberia fallar")
         } catch IPTVError.emptyPlaylist {
             // El estado superior conserva la fuente anterior.
@@ -98,7 +98,7 @@ final class ImporterTests: XCTestCase {
                                   datas: ["http://list.tv/xmltv": Data("<tv><x".utf8)])
         let importer = SourceImporter(fetcher: fetcher)
         let out = try await importer.importSource(.m3uURL(url: "http://list.tv/p.m3u",
-                                                          xmltvURL: "http://list.tv/xmltv"))
+                                                          xmltvURL: "http://list.tv/xmltv"), policy: NetworkPolicy(allowHTTP: true))
         XCTAssertEqual(out.channels.count, 1)
         XCTAssertNil(out.guide)
         XCTAssertNotNil(out.guideWarning)
@@ -108,7 +108,7 @@ final class ImporterTests: XCTestCase {
         let fetcher = StubFetcher(texts: ["http://list.tv/p.m3u": playlist])
         let importer = SourceImporter(fetcher: fetcher)
         let out = try await importer.importSource(.m3uURL(url: "http://list.tv/p.m3u",
-                                                          xmltvURL: "http://list.tv/missing.xml"))
+                                                          xmltvURL: "http://list.tv/missing.xml"), policy: NetworkPolicy(allowHTTP: true))
         XCTAssertEqual(out.channels.count, 1)
         XCTAssertNotNil(out.guideWarning)
         // El aviso nunca contiene la URL con credenciales.
@@ -119,7 +119,7 @@ final class ImporterTests: XCTestCase {
         let fetcher = StubFetcher(networkError: IPTVError.httpStatus(code: 503, host: "http://srv.tv"))
         let importer = SourceImporter(fetcher: fetcher)
         do {
-            _ = try await importer.importSource(.m3uURL(url: "http://srv.tv/p.m3u?u=x&p=y", xmltvURL: nil))
+            _ = try await importer.importSource(.m3uURL(url: "http://srv.tv/p.m3u?u=x&p=y", xmltvURL: nil), policy: NetworkPolicy(allowHTTP: true))
             XCTFail("deberia fallar")
         } catch let IPTVError.httpStatus(code, host) {
             XCTAssertEqual(code, 503)
@@ -130,7 +130,7 @@ final class ImporterTests: XCTestCase {
     func testLocalFileImport() async throws {
         let fetcher = StubFetcher(files: ["/tmp/lista.m3u": playlist])
         let importer = SourceImporter(fetcher: fetcher)
-        let out = try await importer.importSource(.m3uFile(path: "/tmp/lista.m3u", xmltvURL: nil))
+        let out = try await importer.importSource(.m3uFile(path: "/tmp/lista.m3u", xmltvURL: nil), policy: NetworkPolicy(allowHTTP: true))
         XCTAssertEqual(out.channels.count, 1)
     }
 
@@ -145,7 +145,7 @@ final class ImporterTests: XCTestCase {
         let fetcher = StubFetcher(texts: [m3uKey: playlist],
                                   datas: [xmlKey: Data("<?xml version=\"1.0\"?><tv></tv>".utf8)])
         let importer = SourceImporter(fetcher: fetcher)
-        let out = try await importer.importSource(.xtream(baseURL: "srv.tv", username: "u", password: "p"))
+        let out = try await importer.importSource(.xtream(baseURL: "http://srv.tv", username: "u", password: "p"), policy: NetworkPolicy(allowHTTP: true))
         XCTAssertEqual(out.channels.count, 1)
         XCTAssertNotNil(out.guide)
     }
@@ -153,6 +153,25 @@ final class ImporterTests: XCTestCase {
     func testFTPSourceRejected() async {
         let importer = SourceImporter(fetcher: StubFetcher())
         await XCTAssertThrowsErrorAsync(try await importer.importSource(.m3uURL(url: "ftp://h/l.m3u", xmltvURL: nil)))
+    }
+
+    func testHTTPSListWithHTTPChannelsRequiresConsent() async {
+        let importer = SourceImporter(fetcher: StubFetcher(texts: ["https://list.tv/list": playlist]))
+        do {
+            _ = try await importer.importSource(.m3uURL(url: "https://list.tv/list", xmltvURL: nil))
+            XCTFail("HTTP channels need explicit consent")
+        } catch IPTVError.httpConsentRequired { }
+        catch { XCTFail("Unexpected \(error)") }
+    }
+
+    func testHTTPSListWithHTTPGuideRequiresConsent() async {
+        let httpsPlaylist = playlist.replacingOccurrences(of: "http://", with: "https://")
+        let importer = SourceImporter(fetcher: StubFetcher(texts: ["https://list.tv/list": httpsPlaylist]))
+        do {
+            _ = try await importer.importSource(.m3uURL(url: "https://list.tv/list", xmltvURL: "http://list.tv/guide"))
+            XCTFail("HTTP guide needs explicit consent")
+        } catch IPTVError.httpConsentRequired { }
+        catch { XCTFail("Unexpected \(error)") }
     }
 }
 

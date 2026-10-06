@@ -10,49 +10,37 @@ public protocol ContentFetching: Sendable {
 }
 
 public struct ContentFetcher: ContentFetching {
-    private let session: URLSession
+    private let client: SecureHTTPClient
 
     /// Sesion efimera sin cache: nada de credenciales en disco.
-    public init(timeout: TimeInterval = 30) {
-        let config = URLSessionConfiguration.ephemeral
-        config.urlCache = nil
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.timeoutIntervalForRequest = timeout
-        config.timeoutIntervalForResource = max(timeout, 120)
-        config.httpAdditionalHeaders = ["User-Agent": PlaybackPolicy.playlistUserAgent]
-        self.session = URLSession(configuration: config)
+    public init(timeout: TimeInterval = 30, policy: NetworkPolicy = NetworkPolicy()) {
+        self.client = SecureHTTPClient(policy: policy, timeout: timeout)
     }
 
     public func fetchData(_ url: URL) async throws -> Data {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            throw IPTVError.unsupportedScheme(scheme: url.scheme ?? "?")
-        }
+        try await fetch(url, maximumBytes: DownloadLimits.guide)
+    }
+
+    private func fetch(_ url: URL, maximumBytes: Int) async throws -> Data {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue(PlaybackPolicy.playlistUserAgent, forHTTPHeaderField: "User-Agent")
         do {
-            let (data, response) = try await session.data(for: request)
-            if let http = response as? HTTPURLResponse,
-               !(200...299).contains(http.statusCode) {
-                DiagnosticLog.record(.playlist, error: NSError(domain: "HTTP", code: http.statusCode))
-                // Solo codigo y origen reducido: nunca la URL completa.
-                throw IPTVError.httpStatus(code: http.statusCode,
-                                           host: URLRedactor.origin(of: url))
+            let result = try await client.fetch(request, maximumBytes: maximumBytes)
+            guard (200...299).contains(result.response.statusCode) else {
+                throw IPTVError.httpStatus(code: result.response.statusCode, host: URLRedactor.origin(of: url))
             }
-            return data
-        } catch let error as IPTVError {
-            throw error
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as URLError where error.code == .cancelled {
-            throw CancellationError()
-        } catch {
+            return result.data
+        } catch let error as IPTVError { throw error }
+        catch is CancellationError { throw CancellationError() }
+        catch {
             DiagnosticLog.record(.playlist, error: error)
             throw IPTVError.network(detail: ErrorDiagnostics.summary(error))
         }
     }
 
     public func fetchString(_ url: URL) async throws -> String {
-        let data = try await fetchData(url)
+        let data = try await fetch(url, maximumBytes: DownloadLimits.playlist)
         guard let text = Self.decodeText(data) else {
             throw IPTVError.network(detail: "respuesta no decodificable como texto.")
         }
@@ -73,7 +61,14 @@ public struct ContentFetcher: ContentFetching {
         guard FileManager.default.fileExists(atPath: expanded) else {
             throw IPTVError.fileMissing(path: expanded)
         }
-        let data = try Data(contentsOf: URL(fileURLWithPath: expanded))
+        let url = URL(fileURLWithPath: expanded)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { throw IPTVError.security(reason: "Selecciona un archivo normal de lista.") }
+        guard (values.fileSize ?? 0) <= DownloadLimits.playlist else { throw IPTVError.downloadTooLarge }
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        let data = try file.read(upToCount: DownloadLimits.playlist + 1) ?? Data()
+        guard data.count <= DownloadLimits.playlist else { throw IPTVError.downloadTooLarge }
         guard let text = Self.decodeText(data) else {
             throw IPTVError.network(detail: "archivo de lista no legible.")
         }

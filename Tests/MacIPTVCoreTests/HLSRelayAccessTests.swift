@@ -3,7 +3,7 @@ import XCTest
 
 final class HLSRelayAccessTests: XCTestCase {
     func testLoopbackRelayRejectsUnknownRoutesWithoutContactingProvider() async throws {
-        let relay = HLSRelay()
+        let relay = HLSRelay(policy: NetworkPolicy(allowHTTP: true, localEndpoints: ["127.0.0.1:1"]))
         // A provider that cannot respond; invalid local paths must still return
         // 404 immediately rather than being forwarded to this destination.
         let local = try await relay.start(upstream: URL(string: "http://127.0.0.1:1/unused.m3u8")!)

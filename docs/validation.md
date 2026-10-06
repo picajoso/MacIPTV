@@ -159,3 +159,32 @@ La prueba prolongada valida el canal utilizado y la adaptación de esta salida H
 - Interfaz del bundle: panel Recientes y botón Canal anterior visibles; ⌥⌘↓ cambió entre dos canales reales y ⌥⌘← regresó al primero. Captura con vídeo visible y controles ocultos tras inactividad. El acceso por AX a las filas laterales no confirmó su activación; la derivación de Recientes se verificó mediante la prueba de AppStore.
 - La sesión real posterior al zapping alcanzó 108 segundos transcurridos, posición 126.68, rate=1, transport=playing y stalls=0. No se modificaron el transporte HLS ni el watchdog. Esta comprobación es breve y no constituye una garantía para todos los canales.
 - Controles visibles en pausa, búfer o VoiceOver; las pulsaciones en el reproductor y el movimiento del puntero los revelan. No capturan clics ni aparecen en accesibilidad mientras están ocultos.
+
+
+## 0.2.1 (build 8) — 6 de octubre de 2026
+
+- Se reprodujo la desaparición de una variante activa tras 101 actualizaciones de su lista, sin volver a cargar la maestra. La nueva regresión mantiene la variante disponible durante 205 actualizaciones y comprueba que un segmento antiguo desaparece.
+- Se reprodujo la reescritura de un recurso compartido en varias URLs locales dejando desplazamientos de bytes implícitos. La regresión exige offsets explícitos 20, 120 y 170; incluye rutas relativas equivalentes, comentarios y rechazo de rangos sin predecesor válido, cambio de recurso, interrupción por un segmento completo y desbordamiento.
+- Las tres regresiones nuevas fallaron con la implementación anterior y pasan con la corrección. Suite completa final: 83 tests, cero fallos, ejecutada fuera del sandbox.
+- scripts/programme-refresh-smoke.swift aloja ContentView de producción con un canal sintético cuya URL está vacía y dos programas separados por cinco segundos. OCR confirma el programa inicial en la lista y el panel. Tras 36 segundos sin interacción, la versión anterior seguía mostrando ambos títulos antiguos (FAIL); la corregida muestra ambos títulos nuevos y ninguno antiguo (PASS). No utiliza el llavero ni un proveedor real.
+
+- La revisión independiente detectó mutaciones parciales al rechazar un manifiesto. Se reprodujo con una cuarta regresión que exige conservar los destinos anteriores; falló antes y pasó al hacer la reescritura transaccional. La segunda revisión no encontró defectos en ese ajuste.
+- Paquete release 0.2.1/build 8 generado en dist/MacIPTV.app; firma ad hoc verificada, Info.plist válido y ZIP íntegro.
+
+Estas pruebas verifican los defectos concretos de la revisión. No se ha realizado una nueva prueba prolongada de reproducción con la suscripción del usuario.
+
+
+## 0.3.0 (build 9) — endurecimiento de seguridad, 6 de octubre de 2026
+
+- Suite completa: 120 tests, cero fallos. Incluye HTTP consentido, prohibición de downgrade HTTPS→HTTP, IP privadas IPv4/IPv6, DNS mixto, excepciones solo IP/puerto, redirecciones a servicios locales, cuerpos excesivos declarados y chunked, límites M3U/XMLTV, DTD/entidades, migración de configuración y permiso HTTP para medios/guía de listas HTTPS.
+- Se reprodujeron atributos URI HLS ambiguos que salían sin reescribir (tres fallos); la regresión pasa con rechazo estricto. Se comprueban referencias file/private, límite de manifiesto y clasificación de SESSION-KEY/MAP.
+- Cuatro solicitudes abandonadas a un proveedor sintético con respuesta retardada liberan sus cuatro cupos y una nueva petición responde antes de un segundo. Una cabecera local incompleta se cierra a los cinco segundos, sin contactar al proveedor.
+- Resolución DNS: cancelación y deadline liberan al solicitante y descartan respuestas tardías. La llamada getaddrinfo del sistema no se puede interrumpir; conserva su cupo hasta terminar, con un máximo global de cuatro trabajadores, evitando acumulación de hilos.
+- App temporal firmada con exactamente los entitlements y runtime del paquete: deniega lectura del archivo sintético no seleccionado, permite almacenamiento en su container, HTTPS a la muestra pública Apple a través del gateway y relay HLS en loopback. scripts/security-sandbox-smoke.swift reproduce el ensayo sin leer la fuente guardada.
+- scripts/security-bookmark-smoke.swift: selector NSOpenPanel usado únicamente con .build/security-forbidden.txt sintético; bookmark guardado en su container. Un segundo proceso resuelve y lee el archivo; intentar abrirlo para escritura falla. No se accedió a archivos privados.
+- scripts/recovery-smoke.swift compilado con PlayerView y objetos Core finales, empaquetado con los mismos entitlements: reproduce la muestra pública, se inyecta una pausa involuntaria y sustituye el elemento congelado, reanudando vídeo dentro del plazo de 70 segundos.
+- El paquete release arrancó en --demo: configuración HTTP desactivada por defecto, aviso de interceptación al marcarla, campo de autorización por IP/puerto y confirmación antes de entregar URL a VLC visibles. Se canceló la apertura externa y se cerró la demo.
+- Firma local con flags adhoc,runtime, App Sandbox, red cliente/servidor, archivos elegidos de solo lectura y bookmarks app-scope. Sin permisos de depuración, JIT ni excepciones amplias de archivos. El listener de producción se enlaza exclusivamente a 127.0.0.1.
+- La firma estricta, plist y ZIP se verifican; se entrega un SHA-256 del ZIP. Ninguna de estas comprobaciones acredita la identidad del editor ni sustituye notarización.
+
+Límites: no se volvió a consultar el llavero personal ni se usó la suscripción real durante este endurecimiento. La autorización de una entrada antigua tras cambiar firma/sandbox puede requerir el diálogo de macOS y no se validó con datos personales. La compatibilidad prolongada de todos los proveedores, macOS 14 e Intel sigue sin verificarse. El reproductor integrado requiere HLS; MP4 directo, DRM y content steering necesitan reproductor externo. HTTP autorizado sigue sin cifrar; el sandbox no controla lo que haga VLC/IINA. Los ensayos firmados directos pueden emitir un aviso de Launch Services sobre su ubicación temporal; se verificaron por separado los resultados efectivos del aislamiento, permisos y reproducción.

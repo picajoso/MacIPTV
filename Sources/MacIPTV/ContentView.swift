@@ -6,6 +6,13 @@ import MacIPTVCore
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @State private var bannerVisible = false
+    @State private var externalRequest: ExternalRequest?
+
+    private struct ExternalRequest: Identifiable {
+        let id = UUID()
+        let url: String
+        let app: String
+    }
 
     var body: some View {
         @Bindable var store = store
@@ -40,6 +47,9 @@ struct ContentView: View {
                                                        set: { if !$0 { store.lastError = nil } })) {
             Button("Aceptar", role: .cancel) { store.lastError = nil }
             Button("Reintentar") { store.refresh() }
+            if store.needsHTTPConsent {
+                Button("Permitir HTTP para esta fuente") { store.authorizeHTTPForPendingSource() }
+            }
             if store.lastError?.contains("Llavero") == true {
                 Button("Autorizar llavero") { store.refresh(allowAuthentication: true) }
             }
@@ -47,6 +57,15 @@ struct ContentView: View {
             Text(store.lastError ?? "")
         }
         .preferredColorScheme(.dark)
+        .alert(item: $externalRequest) { request in
+            Alert(title: Text("Abrir en \(request.app)"),
+                  message: Text("La URL del canal puede incluir tus credenciales. \(request.app) recibirá esa URL y podrá guardarla en su historial. Sus conexiones no pasan por las protecciones de MacIPTV."),
+                  primaryButton: .default(Text("Abrir")) {
+                      if !ExternalPlayer.open(request.url, app: request.app) {
+                          store.lastError = "No se pudo abrir \(request.app)."
+                      }
+                  }, secondaryButton: .cancel())
+        }
         .tint(Color(red: 0.45, green: 0.90, blue: 0.75))
     }
 
@@ -104,7 +123,9 @@ struct ContentView: View {
     // MARK: Reproductor y programa actual
 
     @ViewBuilder private var playerPane: some View {
-        PlayerView(channel: store.selectedChannel)
+        let sourceID = store.activeSourceID
+        PlayerView(channel: store.selectedChannel, networkPolicy: store.networkPolicy, sourceID: sourceID,
+                   onHTTPConsentRequired: { store.requestHTTPConsentForPlayback(sourceID: sourceID) })
             .overlay(alignment: .topLeading) {
                 if bannerVisible, let channel = store.selectedChannel {
                     VStack(alignment: .leading, spacing: 4) {
@@ -137,24 +158,26 @@ struct ContentView: View {
 
     @ViewBuilder private var programInfo: some View {
         if let channel = store.selectedChannel {
-            HStack(spacing: 8) {
-                Text(channel.name).font(.headline)
-                if store.favorites.contains(channel.id) {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                        .font(.caption)
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                HStack(spacing: 8) {
+                    Text(channel.name).font(.headline)
+                    if store.favorites.contains(channel.id) {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .font(.caption)
+                    }
+                    if let programme = store.nowPlaying(channel, at: context.date) {
+                        Text("-").foregroundStyle(.secondary)
+                        Text(programme.title)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
                 }
-                if let programme = store.nowPlaying(channel) {
-                    Text("-").foregroundStyle(.secondary)
-                    Text(programme.title)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.bar)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.bar)
         }
     }
 
@@ -192,15 +215,11 @@ struct ContentView: View {
                 Button("Abrir diagnostico") { NSWorkspace.shared.open(DiagnosticLog.fileURL) }
                 if let channel = store.selectedChannel {
                     Button("Abrir en VLC") {
-                        if !ExternalPlayer.open(channel.url, app: "VLC") {
-                            store.lastError = "VLC no esta instalado. Instalalo desde videolan.org para abrir este canal."
-                        }
+                        externalRequest = ExternalRequest(url: channel.url, app: "VLC")
                     }
                     .disabled(!ExternalPlayer.isInstalled("VLC"))
                     Button("Abrir en IINA") {
-                        if !ExternalPlayer.open(channel.url, app: "IINA") {
-                            store.lastError = "IINA no esta instalado. Instalalo desde iina.io para abrir este canal."
-                        }
+                        externalRequest = ExternalRequest(url: channel.url, app: "IINA")
                     }
                     .disabled(!ExternalPlayer.isInstalled("IINA"))
                     Divider()
@@ -239,8 +258,25 @@ struct ChannelListView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        @Bindable var store = store
-        return List {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            channelList(at: context.date)
+        }
+        .onMoveCommand { direction in
+            switch direction {
+            case .up: store.moveSelection(by: -1)
+            case .down: store.moveSelection(by: 1)
+            default: break
+            }
+        }
+        .overlay {
+            if store.visibleChannels.isEmpty && store.hasChannels {
+                ContentUnavailableView("Nada que mostrar", systemImage: "magnifyingglass")
+            }
+        }
+    }
+
+    private func channelList(at date: Date) -> some View {
+        List {
             ForEach(store.visibleChannels) { channel in
                 HStack {
                     Button {
@@ -249,7 +285,7 @@ struct ChannelListView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(channel.name)
                                 .foregroundStyle(.primary)
-                            if let programme = store.nowPlaying(channel) {
+                            if let programme = store.nowPlaying(channel, at: date) {
                                 Text(programme.title)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -280,18 +316,6 @@ struct ChannelListView: View {
                 }
                 .listRowBackground(store.selectedChannelID == channel.id
                                    ? Color.accentColor.opacity(0.25) : Color.clear)
-            }
-        }
-        .onMoveCommand { direction in
-            switch direction {
-            case .up: store.moveSelection(by: -1)
-            case .down: store.moveSelection(by: 1)
-            default: break
-            }
-        }
-        .overlay {
-            if store.visibleChannels.isEmpty && store.hasChannels {
-                ContentUnavailableView("Nada que mostrar", systemImage: "magnifyingglass")
             }
         }
     }

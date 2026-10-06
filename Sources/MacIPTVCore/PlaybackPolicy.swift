@@ -8,8 +8,8 @@ public enum PlaybackPolicy {
     /// al video. Perfil de lista comprobado por separado del de reproduccion.
     public static let playlistUserAgent = "MacIPTV/1.0"
 
-    /// Adapt only recognized Xtream live HLS URLs. Public/ordinary HLS keeps
-    /// the direct AVFoundation path; credentials remain inside the relay actor.
+    /// Recognizes Xtream URLs that require token-stabilizing HLS adaptation.
+    /// All native HLS now traverses the protected relay, including public HLS.
     public static func needsHLSRelay(for url: URL) -> Bool {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
         let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""

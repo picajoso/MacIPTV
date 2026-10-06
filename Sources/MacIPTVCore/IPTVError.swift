@@ -1,6 +1,9 @@
 import Foundation
 
 public enum IPTVError: Error, Equatable, LocalizedError {
+    case security(reason: String)
+    case httpConsentRequired
+    case downloadTooLarge
     case invalidURL(reason: String)
     case unsupportedScheme(scheme: String)
     /// Solo se guarda el codigo y el origen ya reducido; nunca la URL completa.
@@ -13,6 +16,12 @@ public enum IPTVError: Error, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
+        case .security(let reason):
+            return reason
+        case .httpConsentRequired:
+            return "Esta fuente solicita HTTP sin cifrar. Autorízalo solo si aceptas que tu suscripción pueda ser interceptada en la red."
+        case .downloadTooLarge:
+            return "La respuesta supera el límite de tamaño permitido."
         case .invalidURL(let reason):
             return "La direccion introducida no es valida: " + reason + "."
         case .unsupportedScheme(let scheme):

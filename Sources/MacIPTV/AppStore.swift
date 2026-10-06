@@ -12,6 +12,22 @@ final class AppStore {
     var isImporting = false
     var sourceSummary: String?
     var demoMode = false
+    var networkPolicy = NetworkPolicy()
+    private var pendingHTTPSource: SavedSource?
+    private var activeSource: SavedSource?
+    private(set) var activeSourceID: UUID?
+    var needsHTTPConsent: Bool { pendingHTTPSource != nil }
+    func authorizeHTTPForPendingSource() {
+        guard var saved = pendingHTTPSource else { return }
+        saved.policy.allowHTTP = true
+        load(saved.source, policy: saved.policy, fileBookmark: saved.fileBookmark)
+    }
+    func requestHTTPConsentForPlayback(sourceID: UUID?) {
+        guard sourceID != nil, sourceID == activeSourceID,
+              let saved = activeSource, !saved.policy.allowHTTP, pendingHTTPSource == nil else { return }
+        pendingHTTPSource = saved
+        lastError = IPTVError.httpConsentRequired.errorDescription
+    }
     var selectedChannelID: String? {
         didSet {
             guard let id = selectedChannelID, id != oldValue else { return }
@@ -60,6 +76,9 @@ final class AppStore {
             isImporting = false
             lastError = nil
             demoMode = true
+            networkPolicy = NetworkPolicy()
+            activeSource = nil
+            activeSourceID = nil
             applyDemo()
             return
         }
@@ -112,7 +131,9 @@ final class AppStore {
 
     /// Reemplaza la fuente solo si la importacion tiene exito; cualquier
     /// fallo deja intactos los canales y la configuracion anteriores.
-    func load(_ source: SourceConfiguration) {
+    func load(_ source: SourceConfiguration, policy: NetworkPolicy = NetworkPolicy(), fileBookmark: Data? = nil) {
+        let saved = SavedSource(source: source, policy: policy, fileBookmark: fileBookmark)
+        pendingHTTPSource = nil
         importTask?.cancel()
         importGeneration += 1
         let generation = importGeneration
@@ -121,12 +142,12 @@ final class AppStore {
         importTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let outcome = try await self.importer.importSource(source)
+                let outcome = try await self.importer.importSource(source, policy: policy, fileBookmark: fileBookmark)
                 // Verifica que sigue siendo la importacion vigente.
                 guard !Task.isCancelled, generation == self.importGeneration else { return }
                 // Primero persiste la configuracion; si el Llavero falla,
                 // conserva canales y fuente previos.
-                try await self.keychain.save(source)
+                try await self.keychain.save(saved)
                 guard !Task.isCancelled, generation == self.importGeneration else { return }
                 // Cargar una fuente real desde demo sale del modo demo.
                 if self.demoMode {
@@ -136,6 +157,14 @@ final class AppStore {
                 self.selectedGroup = "__todos"
                 self.apply(outcome)
                 self.sourceSummary = source.summary
+                self.networkPolicy = policy
+                self.activeSource = saved
+                self.activeSourceID = UUID()
+            } catch IPTVError.httpConsentRequired {
+                if generation == self.importGeneration {
+                    self.pendingHTTPSource = saved
+                    self.lastError = IPTVError.httpConsentRequired.errorDescription
+                }
             } catch is CancellationError {
                 // Cancelada por una importacion mas nueva o por limpiar la fuente.
             } catch let error as IPTVError {
@@ -162,10 +191,10 @@ final class AppStore {
         importTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let source = try await self.keychain.load(allowAuthentication: allowAuthentication)
+                let source = try await self.keychain.loadSaved(allowAuthentication: allowAuthentication)
                 guard !Task.isCancelled, generation == self.importGeneration else { return }
                 self.isImporting = false
-                if let source { self.load(source) }
+                if let source { self.load(source.source, policy: source.policy, fileBookmark: source.fileBookmark) }
             } catch {
                 guard !Task.isCancelled, generation == self.importGeneration else { return }
                 self.lastError = (error as? LocalizedError)?.errorDescription ?? "No se pudo leer la fuente guardada."
@@ -194,6 +223,9 @@ final class AppStore {
     }
 
     func removeSource() {
+        activeSource = nil
+        activeSourceID = nil
+        pendingHTTPSource = nil
         importTask?.cancel()
         importGeneration += 1
         let generation = importGeneration
@@ -226,6 +258,10 @@ final class AppStore {
     }
 
     func startDemo() {
+        activeSource = nil
+        activeSourceID = nil
+        pendingHTTPSource = nil
+        networkPolicy = NetworkPolicy()
         importTask?.cancel()
         importGeneration += 1
         isImporting = false
@@ -297,9 +333,9 @@ final class AppStore {
         return channels.first { $0.id == id }
     }
 
-    func nowPlaying(_ channel: Channel) -> Programme? {
+    func nowPlaying(_ channel: Channel, at date: Date = Date()) -> Programme? {
         guard let tvg = channel.tvgID, !tvg.isEmpty else { return nil }
-        return guide?.nowPlaying(channelID: tvg, at: Date())
+        return guide?.nowPlaying(channelID: tvg, at: date)
     }
 
     func toggleFavoriteFromGuide(_ channel: Channel) { toggleFavorite(channel.id) }

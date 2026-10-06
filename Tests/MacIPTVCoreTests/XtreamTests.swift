@@ -5,7 +5,7 @@ final class XtreamTests: XCTestCase {
 
     func testValidatedBaseAddsSchemeOnlyWhenMissing() throws {
         XCTAssertEqual(try XtreamEndpoints.validatedBaseURL("miptv.tv:8080").absoluteString,
-                       "http://miptv.tv:8080/")
+                       "https://miptv.tv:8080/")
         XCTAssertEqual(try XtreamEndpoints.validatedBaseURL("https://miptv.tv").absoluteString,
                        "https://miptv.tv/")
     }

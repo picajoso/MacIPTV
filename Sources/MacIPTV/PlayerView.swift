@@ -17,6 +17,9 @@ enum PlayerStatus: Equatable {
 /// Acepta canal opcional: sin seleccion muestra un aviso en lugar de fallar.
 struct PlayerView: View {
     let channel: Channel?
+    var networkPolicy = NetworkPolicy()
+    var sourceID: UUID?
+    var onHTTPConsentRequired: @MainActor () -> Void = {}
     @State private var player = AVPlayer()
     @State private var status: PlayerStatus = .idle
     @State private var observation: NSKeyValueObservation?
@@ -37,6 +40,11 @@ struct PlayerView: View {
     @State private var relayCleanup: Task<Void, Never>?
     @State private var controlsVisible = true
     @State private var hideControlsTask: Task<Void, Never>?
+    private struct PlaybackRequest: Equatable {
+        let channel: Channel?
+        let policy: NetworkPolicy
+        let sourceID: UUID?
+    }
 
     var body: some View {
         ZStack {
@@ -66,7 +74,7 @@ struct PlayerView: View {
         }
         // Una sola transicion por cambio de canal evita abrir dos conexiones
         // a la vez cuando cambian su id y su URL en el mismo render.
-        .onChange(of: channel) { _, _ in start() }
+        .onChange(of: PlaybackRequest(channel: channel, policy: networkPolicy, sourceID: sourceID)) { _, _ in start() }
         .onChange(of: retryCounter.count) { _, _ in start() }
         // Los cambios de estado reprograman o fijan la visibilidad sin
         // necesidad de mover el puntero (p. ej. inicio de recuperacion).
@@ -243,26 +251,29 @@ struct PlayerView: View {
         player.volume = Float(volume)
         player.isMuted = isMuted
         let nativeURL = PlaybackPolicy.nativeURL(for: url)
-        if PlaybackPolicy.needsHLSRelay(for: nativeURL) {
-            let adapter = HLSRelay()
-            relay = adapter
-            let cleanup = relayCleanup
-            connectionTask = Task { @MainActor in
-                await cleanup?.value
-                guard generation == self.generation, !Task.isCancelled else { return }
-                do {
-                    let localURL = try await adapter.start(upstream: nativeURL)
-                    guard generation == self.generation, !Task.isCancelled else { await adapter.stop(); return }
-                    self.configurePlayer(url: localURL, generation: generation, isReconnect: !resetRecovery)
-                } catch {
-                    await adapter.stop()
-                    guard generation == self.generation, !Task.isCancelled else { return }
-                    DiagnosticLog.record(.playback, error: error)
-                    self.status = .failed(ErrorDiagnostics.summary(error))
-                }
+        do { try networkPolicy.validate(nativeURL) } catch { status = .failed(error.localizedDescription); return }
+        let notify = onHTTPConsentRequired
+        let adapter = HLSRelay(policy: networkPolicy, onHTTPConsentRequired: {
+            await MainActor.run {
+                guard generation == self.generation else { return }
+                notify()
             }
-        } else {
-            configurePlayer(url: nativeURL, generation: generation, isReconnect: !resetRecovery)
+        })
+        relay = adapter
+        let cleanup = relayCleanup
+        connectionTask = Task { @MainActor in
+            await cleanup?.value
+            guard generation == self.generation, !Task.isCancelled else { return }
+            do {
+                let localURL = try await adapter.start(upstream: nativeURL)
+                guard generation == self.generation, !Task.isCancelled else { await adapter.stop(); return }
+                self.configurePlayer(url: localURL, generation: generation, isReconnect: !resetRecovery)
+            } catch {
+                await adapter.stop()
+                guard generation == self.generation, !Task.isCancelled else { return }
+                DiagnosticLog.record(.playback, error: error)
+                self.status = .failed(ErrorDiagnostics.summary(error))
+            }
         }
     }
 

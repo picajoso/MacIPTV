@@ -99,40 +99,89 @@ final class GuideBuilder: NSObject, XMLParserDelegate {
     private var currentDetails = ""
     private var capturingTitle = false
     private var capturingDetails = false
+    private var programmeCount = 0
+    private var titleBytes = 0
+    private var detailsBytes = 0
     var errorText: String?
+
+    private func abort(_ parser: XMLParser, detail: String) {
+        if errorText == nil { errorText = detail }
+        parser.abortParsing()
+    }
+
+    // Defense in depth for declared entities; predefined XML entities remain
+    // supported. Preflight rejects DTDs before libxml can expand their contents.
+    func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName name: String, value: String?) {
+        abort(parser, detail: ParserLimits.xmltvDTDDetail)
+    }
+
+    func parser(_ parser: XMLParser, foundExternalEntityDeclarationWithName name: String,
+                publicID: String?, systemID: String?) {
+        abort(parser, detail: ParserLimits.xmltvDTDDetail)
+    }
+
+    func parser(_ parser: XMLParser, resolveExternalEntityName name: String, systemID: String?) -> Data? {
+        abort(parser, detail: ParserLimits.xmltvDTDDetail)
+        return nil
+    }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                 qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        guard errorText == nil else { return }
         switch elementName {
         case "programme":
+            programmeCount += 1
+            guard programmeCount <= ParserLimits.xmltvProgrammes else {
+                abort(parser, detail: ParserLimits.xmltvLimitDetail)
+                return
+            }
             currentChannelID = attributeDict["channel"]
             currentStart = attributeDict["start"].flatMap(XMLTVDateFormatterCache.date)
             currentEnd = attributeDict["stop"].flatMap(XMLTVDateFormatterCache.date)
             currentTitle = ""
             currentDetails = ""
+            titleBytes = 0
+            detailsBytes = 0
         case "title":
             capturingTitle = true
             currentTitle = ""
+            titleBytes = 0
         case "desc":
             capturingDetails = true
             currentDetails = ""
+            detailsBytes = 0
         default:
             break
         }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if capturingTitle { currentTitle += string }
-        if capturingDetails { currentDetails += string }
+        guard errorText == nil, capturingTitle || capturingDetails else { return }
+        let bytes = string.utf8.count
+        guard (!capturingTitle || bytes <= ParserLimits.xmltvFieldBytes - titleBytes),
+              (!capturingDetails || bytes <= ParserLimits.xmltvFieldBytes - detailsBytes) else {
+            abort(parser, detail: ParserLimits.xmltvLimitDetail)
+            return
+        }
+        if capturingTitle { titleBytes += bytes; currentTitle += string }
+        if capturingDetails { detailsBytes += bytes; currentDetails += string }
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        if capturingTitle, let s = String(data: CDATABlock, encoding: .utf8) { currentTitle += s }
-        if capturingDetails, let s = String(data: CDATABlock, encoding: .utf8) { currentDetails += s }
+        guard errorText == nil, capturingTitle || capturingDetails else { return }
+        guard (!capturingTitle || CDATABlock.count <= ParserLimits.xmltvFieldBytes - titleBytes),
+              (!capturingDetails || CDATABlock.count <= ParserLimits.xmltvFieldBytes - detailsBytes) else {
+            abort(parser, detail: ParserLimits.xmltvLimitDetail)
+            return
+        }
+        if let string = String(data: CDATABlock, encoding: .utf8) {
+            self.parser(parser, foundCharacters: string)
+        }
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
                 qualifiedName qName: String?) {
+        guard errorText == nil else { return }
         switch elementName {
         case "title":
             capturingTitle = false
@@ -166,15 +215,27 @@ final class GuideBuilder: NSObject, XMLParserDelegate {
 }
 
 public enum XMLTVParser {
+    /// Rechaza fuentes >64 MiB, >500 000 elementos programme (también
+    /// inválidos), campos title/desc >64 KiB UTF-8 y cualquier DTD.
+    /// No devuelve guías parciales ni resuelve entidades externas.
     public static func parse(_ data: Data) throws -> XMLTVGuide {
+        guard data.count <= ParserLimits.xmltvBytes else {
+            throw IPTVError.xmltvInvalid(detail: ParserLimits.xmltvLimitDetail)
+        }
+        guard !ParserLimits.containsDTD(data) else {
+            throw IPTVError.xmltvInvalid(detail: ParserLimits.xmltvDTDDetail)
+        }
         var cleaned = data
         if cleaned.count >= 3, cleaned[0] == 0xEF, cleaned[1] == 0xBB, cleaned[2] == 0xBF {
             cleaned = cleaned.subdata(in: 3..<cleaned.count)
         }
         let builder = GuideBuilder()
         let parser = XMLParser(data: cleaned)
+        parser.shouldResolveExternalEntities = false
+        parser.externalEntityResolvingPolicy = .never
         parser.delegate = builder
-        guard parser.parse() else {
+        let parsed = parser.parse()
+        guard parsed, builder.errorText == nil else {
             throw IPTVError.xmltvInvalid(detail: builder.errorText
                 ?? parser.parserError?.localizedDescription ?? "XML malformado")
         }
