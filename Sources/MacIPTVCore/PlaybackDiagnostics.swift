@@ -2,7 +2,7 @@ import Foundation
 
 /// Explicitly typed telemetry. Never accepts a URL, channel name or provider text.
 public struct PlaybackSnapshot {
-    public enum Trigger: String { case periodic, ready, stalled, failed, ended, access, mediaError }
+    public enum Trigger: String { case periodic, ready, stalled, failed, ended, access, mediaError, transport }
     public enum Transport: String { case playing, waiting, paused }
     public enum Wait: String { case none, buffer, evaluate, noItem, other }
     public let trigger: Trigger
@@ -24,24 +24,26 @@ public struct PlaybackSnapshot {
     public let bytes: Int64
     public let observedBitrate: Double
     public let indicatedBitrate: Double
+    public let videoTime: Double
     public let droppedFrames: Int
 
     public init(trigger: Trigger, session: UUID, elapsed: Double, position: Double, duration: Double,
                 rate: Float, itemStatus: Int, transport: Transport, wait: Wait, bufferedAhead: Double,
                 seekableStart: Double, seekableEnd: Double, bufferEmpty: Bool, likelyToKeepUp: Bool,
                 mediaRequests: Int, stalls: Int, bytes: Int64, observedBitrate: Double, indicatedBitrate: Double,
-                droppedFrames: Int) {
+                droppedFrames: Int, videoTime: Double = .nan) {
         self.trigger = trigger; self.session = session; self.elapsed = elapsed; self.position = position
         self.duration = duration; self.rate = rate; self.itemStatus = itemStatus; self.transport = transport
         self.wait = wait; self.bufferedAhead = bufferedAhead; self.seekableStart = seekableStart
         self.seekableEnd = seekableEnd; self.bufferEmpty = bufferEmpty; self.likelyToKeepUp = likelyToKeepUp
         self.mediaRequests = mediaRequests; self.stalls = stalls; self.bytes = bytes
         self.observedBitrate = observedBitrate; self.indicatedBitrate = indicatedBitrate
+        self.videoTime = videoTime
         self.droppedFrames = droppedFrames
     }
     public var summary: String {
         func number(_ value: Double) -> String { value.isFinite ? String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value) : "unknown" }
-        return "session=\(session.uuidString) event=\(trigger.rawValue) elapsed=\(number(elapsed)) position=\(number(position)) duration=\(number(duration)) rate=\(number(Double(rate))) item=\(itemStatus) transport=\(transport.rawValue) wait=\(wait.rawValue) ahead=\(number(bufferedAhead)) seekable=\(number(seekableStart))...\(number(seekableEnd)) empty=\(bufferEmpty) keepUp=\(likelyToKeepUp) requests=\(mediaRequests) stalls=\(stalls) bytes=\(bytes) observedBitrate=\(number(observedBitrate)) indicatedBitrate=\(number(indicatedBitrate)) dropped=\(droppedFrames)"
+        return "session=\(session.uuidString) event=\(trigger.rawValue) elapsed=\(number(elapsed)) position=\(number(position)) duration=\(number(duration)) rate=\(number(Double(rate))) item=\(itemStatus) transport=\(transport.rawValue) wait=\(wait.rawValue) ahead=\(number(bufferedAhead)) seekable=\(number(seekableStart))...\(number(seekableEnd)) empty=\(bufferEmpty) keepUp=\(likelyToKeepUp) requests=\(mediaRequests) stalls=\(stalls) bytes=\(bytes) observedBitrate=\(number(observedBitrate)) indicatedBitrate=\(number(indicatedBitrate)) dropped=\(droppedFrames) videoTime=\(number(videoTime))"
     }
 }
 

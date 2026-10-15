@@ -13,6 +13,7 @@ let package = Package(
         .executableTarget(
             name: "MacIPTV",
             dependencies: ["MacIPTVCore"],
+            resources: [.copy("Resources/Fonts"), .copy("Resources/Icons")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

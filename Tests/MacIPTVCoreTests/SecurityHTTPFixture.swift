@@ -4,11 +4,13 @@ import Foundation
 import Network
 
 actor SecurityHTTPFixture {
-    enum Reply { case body(Data), chunked(Data), redirect(URL), delayed(Data) }
+    enum Reply { case split(Data, Data), body(Data), chunked(Data), redirect(URL), delayed(Data) }
     private let queue = DispatchQueue(label: "MacIPTV.SecurityHTTPFixture")
     private var listener: NWListener?
     private var clients: [UUID: NWConnection] = [:]
     private var reply: Reply = .body(Data("fixture".utf8))
+    private var tailReleased = false
+    func releaseTail() { tailReleased = true }
     private(set) var requests = 0
     func configure(_ reply: Reply) { self.reply = reply }
     func start() async throws -> URL {
@@ -42,6 +44,11 @@ actor SecurityHTTPFixture {
             }
             requests += 1
             switch reply {
+            case .split(let prefix, let suffix):
+                try await SocketIO.send(Data("HTTP/1.1 200 OK\r\nContent-Length: \(prefix.count + suffix.count)\r\nConnection: close\r\n\r\n".utf8), to: connection)
+                try await SocketIO.send(prefix, to: connection)
+                while !tailReleased && listener != nil { try await Task.sleep(nanoseconds: 10_000_000) }
+                try await SocketIO.send(suffix, to: connection)
             case .delayed(let data):
                 try await Task.sleep(nanoseconds: 5_000_000_000)
                 var response = Data("HTTP/1.1 200 OK\r\nContent-Length: \(data.count)\r\nConnection: close\r\n\r\n".utf8)

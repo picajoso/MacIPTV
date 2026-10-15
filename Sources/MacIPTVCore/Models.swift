@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Channel: Identifiable, Hashable, Sendable {
+public struct Channel: Identifiable, Hashable, Codable, Sendable {
     public var id: String
     public var name: String
     public var url: String

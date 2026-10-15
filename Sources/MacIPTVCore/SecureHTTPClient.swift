@@ -2,6 +2,7 @@ import Foundation
 import Network
 
 struct HTTPResult: Sendable { let data: Data; let response: HTTPURLResponse }
+struct HTTPStreamResult: Sendable { let response: HTTPURLResponse; let byteCount: Int }
 
 /// Ephemeral, bounded HTTP with an authenticated, fail-closed pinned-IP gateway.
 actor SecureHTTPClient {
@@ -23,6 +24,52 @@ actor SecureHTTPClient {
         guard maximumBytes > 0, active < 4 else { throw IPTVError.security(reason: "Demasiadas descargas simultáneas.") }
         active += 1
         defer { active -= 1 }
+        let session = try await session()
+        try Task.checkCancellation()
+        return try await delegate.fetch(request, session: session, maximumBytes: maximumBytes)
+    }
+
+    /// Consume segmentos progresivamente con contrapresión: no acumula el
+    /// segmento completo y conserva el gateway, los límites y los redirects.
+    func stream(_ request: URLRequest, maximumBytes: Int,
+                onResponse: @Sendable (HTTPURLResponse) async throws -> Void,
+                onChunk: @Sendable (Data) async throws -> Void) async throws -> HTTPStreamResult {
+        guard let url = request.url else { throw URLError(.badURL) }
+        try policy.validate(url)
+        try Task.checkCancellation()
+        guard maximumBytes > 0, active < 4 else { throw IPTVError.security(reason: "Demasiadas descargas simultáneas.") }
+        active += 1
+        defer { active -= 1 }
+        let session = try await session()
+        let redirects = StreamingRedirectDelegate(policy: policy)
+        do {
+            let (bytes, response) = try await session.bytes(for: request, delegate: redirects)
+            defer { bytes.task.cancel() }
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            guard http.expectedContentLength <= Int64(maximumBytes) else { throw IPTVError.downloadTooLarge }
+            try await onResponse(http)
+            guard (200..<300).contains(http.statusCode) else { return HTTPStreamResult(response: http, byteCount: 0) }
+            var chunk = Data()
+            chunk.reserveCapacity(32 * 1024)
+            var count = 0
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard count < maximumBytes else { throw IPTVError.downloadTooLarge }
+                count += 1
+                chunk.append(byte)
+                if chunk.count == 32 * 1024 {
+                    try await onChunk(chunk)
+                    chunk.removeAll(keepingCapacity: true)
+                }
+            }
+            if !chunk.isEmpty { try await onChunk(chunk) }
+            return HTTPStreamResult(response: http, byteCount: count)
+        } catch {
+            throw redirects.failure ?? error
+        }
+    }
+
+    private func session() async throws -> URLSession {
         if setup == nil {
             let gateway = gateway, delegate = delegate, timeout = timeout
             setup = Task {
@@ -40,7 +87,7 @@ actor SecureHTTPClient {
         }
         let session = try await setup!.value
         try Task.checkCancellation()
-        return try await delegate.fetch(request, session: session, maximumBytes: maximumBytes)
+        return session
     }
     func stop() async {
         setup?.cancel()
@@ -54,6 +101,31 @@ actor SecureHTTPClient {
             setup?.cancel()
             if let session = try? await setup?.value { session.invalidateAndCancel() }
             await gateway.stop()
+        }
+    }
+}
+
+/// El delegado por petición mantiene la misma validación en la API AsyncBytes.
+private final class StreamingRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let policy: NetworkPolicy
+    private let lock = NSLock()
+    private var redirects = 0
+    private var storedFailure: Error?
+    var failure: Error? { lock.lock(); defer { lock.unlock() }; return storedFailure }
+    init(policy: NetworkPolicy) { self.policy = policy }
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        do {
+            guard let destination = request.url else { throw URLError(.badURL) }
+            try policy.validate(destination, redirectedFrom: response.url)
+            redirects += 1
+            guard redirects <= 8 else { throw URLError(.httpTooManyRedirects) }
+            completionHandler(request)
+        } catch {
+            lock.lock(); storedFailure = error; lock.unlock()
+            completionHandler(nil)
+            task.cancel()
         }
     }
 }

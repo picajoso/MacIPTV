@@ -27,7 +27,7 @@ enum DemoContent {
                 guard let start = cal.date(byAdding: .minute, value: offset * 45, to: anchor) else { continue }
                 let end = cal.date(byAdding: .minute, value: 45, to: start)
                 let title = names[abs(offset) % names.count] + " · demo"
-                list.append(Programme(channelID: tvg, title: title, details: "Programacion ficticia de demostracion.",
+                list.append(Programme(channelID: tvg, title: title, details: "Programación ficticia de demostración.",
                                       start: start, end: end))
             }
             dict[tvg] = list

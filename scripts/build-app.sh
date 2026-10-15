@@ -8,6 +8,9 @@ bin_dir="$(swift build -c release --show-bin-path --disable-sandbox)"
 app="$PWD/dist/MacIPTV.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_dir/MacIPTV" "$app/Contents/MacOS/MacIPTV"
+if [ -d "$bin_dir/MacIPTV_MacIPTV.bundle" ]; then
+  ditto "$bin_dir/MacIPTV_MacIPTV.bundle" "$app/Contents/Resources/MacIPTV_MacIPTV.bundle"
+fi
 cp scripts/Info.plist "$app/Contents/Info.plist"
 swift scripts/make-icon.swift "$PWD/.build/MacIPTV.iconset"
 iconutil -c icns "$PWD/.build/MacIPTV.iconset" -o "$app/Contents/Resources/AppIcon.icns"

@@ -24,7 +24,8 @@ public struct SourceImporter: Sendable {
     }
 
     public func importSource(_ source: SourceConfiguration, loadGuide: Bool = true,
-                             policy: NetworkPolicy = NetworkPolicy(), fileBookmark: Data? = nil) async throws -> ImportOutcome {
+                             policy: NetworkPolicy = NetworkPolicy(), fileBookmark: Data? = nil,
+                             onChannelsLoaded: (@MainActor @Sendable (ImportOutcome) async throws -> Void)? = nil) async throws -> ImportOutcome {
         let fetcher: any ContentFetching = self.fetcher ?? ContentFetcher(policy: policy)
         var playlistText: String
         var base: URL?
@@ -75,6 +76,9 @@ public struct SourceImporter: Sendable {
             throw IPTVError.httpConsentRequired
         }
 
+        try Task.checkCancellation()
+        try await onChannelsLoaded?(ImportOutcome(channels: parsed.channels, guide: nil,
+                                                 guideWarning: nil, skippedCount: parsed.skippedCount))
         var guide: XMLTVGuide?
         var guideWarning: String?
         if loadGuide, let xmltvURL {

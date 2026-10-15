@@ -7,15 +7,21 @@ import LocalAuthentication
 public struct KeychainSourceStore: Sendable {
     public static let service = "es.maciptv.source"
     private static let account = "source"
+    private static let catalogAccount = "sources"
+
+    public struct Catalog: Codable, Sendable {
+        public var sources: [UUID: SavedSource]
+        public init(sources: [UUID: SavedSource] = [:]) { self.sources = sources }
+    }
 
     public init() {}
 
-    private func baseQuery(allowAuthentication: Bool = false) -> [String: Any] {
+    private func baseQuery(allowAuthentication: Bool = false, account: String = KeychainSourceStore.account) -> [String: Any] {
         let context = LAContext()
         context.interactionNotAllowed = !allowAuthentication
         return [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: KeychainSourceStore.service,
-         kSecAttrAccount as String: KeychainSourceStore.account,
+         kSecAttrAccount as String: account,
          kSecUseAuthenticationContext as String: context]
     }
 
@@ -68,6 +74,43 @@ public struct KeychainSourceStore: Sendable {
             throw IPTVError.keychain(detail: "no se pudo quitar la fuente (codigo \(status))")
         }
     }
+
+    /// La entrada antigua se conserva hasta que la nueva lista esté guardada.
+    /// Una migración interrumpida puede repetirse sin perder la fuente previa.
+    public func loadCatalog(allowAuthentication: Bool = false) throws -> Catalog {
+        var query = baseQuery(allowAuthentication: allowAuthentication, account: Self.catalogAccount)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound {
+            guard let legacy = try loadSaved(allowAuthentication: allowAuthentication) else { return Catalog() }
+            let catalog = Catalog(sources: [UUID(): legacy])
+            try saveCatalog(catalog)
+            return catalog
+        }
+        guard status == errSecSuccess, let data = item as? Data else {
+            throw IPTVError.keychain(detail: "no se pudo acceder a las fuentes guardadas (codigo \(status))")
+        }
+        do { return try JSONDecoder().decode(Catalog.self, from: data) }
+        catch { throw IPTVError.keychain(detail: "la lista de fuentes guardadas no se pudo leer") }
+    }
+
+    public func saveCatalog(_ catalog: Catalog) throws {
+        let data = try JSONEncoder().encode(catalog)
+        let attributes = baseQuery(allowAuthentication: true, account: Self.catalogAccount)
+        let update = SecItemUpdate(attributes as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if update == errSecItemNotFound {
+            var add = attributes
+            add[kSecValueData as String] = data
+            let status = SecItemAdd(add as CFDictionary, nil)
+            guard status == errSecSuccess else {
+                throw IPTVError.keychain(detail: "no se pudo guardar la lista de fuentes (codigo \(status))")
+            }
+        } else if update != errSecSuccess {
+            throw IPTVError.keychain(detail: "no se pudo actualizar la lista de fuentes (codigo \(update))")
+        }
+    }
 }
 
 /// Las llamadas de Security son sincronas. Este actor las serializa en un
@@ -92,4 +135,12 @@ public actor KeychainSourceRepository {
         try store.save(saved)
     }
     public func clear() throws { try store.clear() }
+    public func loadCatalog(allowAuthentication: Bool = false) throws -> KeychainSourceStore.Catalog {
+        try Task.checkCancellation()
+        return try store.loadCatalog(allowAuthentication: allowAuthentication)
+    }
+    public func saveCatalog(_ catalog: KeychainSourceStore.Catalog) throws {
+        try Task.checkCancellation()
+        try store.saveCatalog(catalog)
+    }
 }

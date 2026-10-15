@@ -6,7 +6,7 @@ Este archivo sirve de guía para Claude Code y otros colaboradores. Describe el 
 
 MacIPTV es una aplicación nativa para macOS 14 o posterior, con interfaz en español e interacción inspirada en TiviMate para Android. Permite ver televisión en directo usando la suscripción IPTV del usuario. No incluye una suscripción, canales comerciales ni credenciales de un proveedor.
 
-La ventana tiene tres zonas: grupos/favoritos y búsqueda, lista de canales y reproductor con programa actual. Admite listas M3U remotas o locales, proveedores Xtream y programación XMLTV. Incluye favoritos persistentes, guía temporal, pantalla completa, pausa, silencio y volumen. El modo demo usa canales y programación ficticios con un vídeo HLS público de Apple.
+La ventana tiene tres zonas: grupos/favoritos, lista de canales con búsqueda y reproductor con programa actual. Los dos paneles laterales se pueden ocultar de forma independiente. Admite listas M3U remotas o locales, proveedores Xtream y programación XMLTV. Incluye favoritos persistentes, guía temporal, pantalla completa, pausa, silencio y volumen. El modo demo usa canales y programación ficticios con un vídeo HLS público de Apple.
 
 Quedan fuera del alcance actual: grabación, catálogo VOD, catch-up, DRM y reproducción simultánea de varios canales. La compatibilidad con todos los proveedores o códecs no está garantizada.
 
@@ -28,6 +28,9 @@ Swift Package Manager, sin dependencias externas declaradas. Se usa el compilado
 | `Sources/MacIPTV/AppStore.swift` | Importación, fuente activa, favoritos, demo y coordinación del llavero. |
 | `Sources/MacIPTV/PlayerView.swift` | AVPlayer, superficie persistente AVPlayerLayer y controles propios; recuperación de emisiones. |
 | `Sources/MacIPTVCore/` | Modelos, parsers, red, URLs Xtream, llavero, diagnósticos y políticas de reproducción. |
+| `Sources/MacIPTV/Theme.swift` | Colores adaptables, fuente Archivo, iconos Lucide y carga de recursos empaquetados. |
+| `Sources/MacIPTV/SettingsView.swift` | Gestión de fuentes, reproducción, apariencia y opciones avanzadas. |
+| `Sources/MacIPTVCore/ChannelCache.swift` | Instantáneas cifradas de canales por fuente para restaurar el arranque. |
 | `Sources/MacIPTVCore/HLSRelay.swift` | Adaptador HTTP nativo limitado a loopback con URLs privadas solo en memoria. |
 | `Sources/MacIPTVCore/HLSRelayRegistry.swift` | Identidades locales estables por lista y secuencia; destinos autorizados actualizados. |
 | `Sources/MacIPTVCore/NetworkPolicy.swift` | Consentimiento HTTP por fuente y comprobación de destinos y redirecciones; excepciones solo IP/puerto. |
@@ -128,7 +131,7 @@ Las versiones 0.1–0.1.4 se desarrollaron el 4 de octubre de 2026; 0.1.5, el 5 
 
 ## Estado y trabajo pendiente
 
-La versión vigente es **0.3.0, build 9**. La suite completa tiene 120 tests pasando, incluidas las regresiones de seguridad, diagnóstico HLS, identidad estable de segmentos, credenciales codificadas, conservación de variantes activas y rangos de bytes explícitos. En la validación de 0.1.5, PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
+La versión del bundle sigue siendo **0.3.0, build 9**; los cambios del 15 de octubre descritos abajo todavía no incrementan esa numeración. La validación histórica de 0.3.0 registró 120 tests pasando, incluidas las regresiones de seguridad, diagnóstico HLS, identidad estable de segmentos, credenciales codificadas, conservación de variantes activas y rangos de bytes explícitos. En la validación de 0.1.5, PlayerView de producción reprodujo el canal real durante 180 segundos sin sustituir el elemento, con 179 fotogramas nuevos comprobados. El registro está en `docs/validation.md`. El entorno de validación fue Apple Silicon, macOS 27, Swift 6.2.3 y Xcode. macOS 14 e Intel son destinos previstos, pero no se han ejecutado allí estas comprobaciones.
 
 El corte periódico de 0.1.4 se ha reproducido y se ha identificado la incompatibilidad de las URIs de segmentos HLS renovadas. La reproducción continua con el proveedor y el adaptador se documenta en la validación de 0.1.5. Esto no implica compatibilidad universal ni una garantía frente a futuros cortes de red o del proveedor.
 
@@ -153,3 +156,44 @@ ChannelListView y el panel de programa actual usan TimelineView cada 30 segundos
 NetworkPolicy/SecureHTTPClient/NetworkGateway canalizan todas las descargas a través de un gateway SOCKS5 local autenticado con destinos IP comprobados y sin fallback directo. DNSResolver acota las llamadas de sistema y libera solicitantes cancelados. Toda reproducción nativa utiliza HLSRelay; no reintroducir AVURLAsset remoto sin mantener controles sobre todas las peticiones. Permisos HTTP y excepciones IP/puerto pertenecen a SavedSource, junto con el bookmark read-only, guardados en Keychain. Una URL del proveedor nunca concede permisos. Callbacks de consentimiento llevan sourceID y generación para descartar avisos antiguos. Los parsers y descargas tienen límites explícitos; DTD/entidades XML y sintaxis URI HLS ambigua se rechazan.
 
 scripts/build-app.sh firma gratuitamente con entitlements y --options runtime; no necesita Developer ID. Distribución no notarizada y sin identidad verificable del editor, decisión deliberada del usuario. La validación firmada, límites y riesgos residuales figuran en docs/security-review-2026-10-06.md y docs/validation.md.
+
+
+## Actualización del 15 de octubre de 2026 — interfaz, arranque y reproducción
+
+### Interfaz nativa y recursos
+
+El rediseño se implementa en SwiftUI con integración AppKit para la ventana, el arrastre del divisor y la superficie AVPlayerLayer. No es una interfaz web. Se incorporan los recursos facilitados en el paquete de diseño: tipografía Archivo y símbolos Lucide, con sus licencias en `Resources/Fonts/OFL.txt` y `Resources/Icons/LICENSE.txt`. SwiftPM copia ambos directorios y `build-app.sh` incluye `MacIPTV_MacIPTV.bundle` en el bundle final. `Theme.swift` resuelve primero los recursos de la app empaquetada y después `Bundle.module`.
+
+La cabecera roja integra búsqueda y pestañas Directo/Guía. Hay vistas específicas de lista de canales, detalle de programa, confirmaciones y ajustes; apariencia del sistema, clara u oscura. La guía muestra una cuadrícula temporal con navegación de días y botón Ahora. El reproductor incluye Ahora/Después, navegación de canales y programación posterior. Los indicadores de recordatorio se conservan solo en memoria: no hay todavía notificaciones del sistema ni programación persistente de avisos.
+
+La gestión de fuentes permite mantener un catálogo en el Llavero, activar o eliminar entradas y conservar navegación/favoritos por fuente. `KeychainSourceStore.Catalog` migra desde la entrada antigua sin borrarla antes de guardar la nueva. Se incorporan ajustes para reanudar el último canal, reproductor externo y tiempo de ocultación de controles.
+
+### Tamaño de la previsualización
+
+El divisor horizontal entre vídeo y Ahora/Después se puede arrastrar en Directo con cero, uno o dos paneles laterales visibles. Su control aparece al pasar el puntero por la zona o mientras se arrastra. No debe quedar un botón permanentemente visible.
+
+La previsualización utiliza siempre ajuste proporcional (`resizeAspect`) y un rectángulo explícito que sigue el tamaño disponible. El modo rellenar se limita a pantalla completa y puede recortar allí. `PlayerSurface` deja que AppKit gestione la capa raíz y aloja AVPlayerLayer como subcapa; en `layout()` actualiza su frame a `bounds` sin animaciones implícitas. No volver a alternar automáticamente entre ajustar y rellenar según la altura: produjo recortes y saltos durante el arrastre.
+
+El ajuste conserva el fotograma completo y aprovecha una dimensión del área disponible. Puede haber bandas por diferencia de proporciones; las bandas negras ya codificadas por el emisor también forman parte del fotograma y no se eliminan automáticamente.
+
+### Restauración rápida y guía en segundo plano
+
+`Channel` es Codable. `ChannelCache` guarda instantáneas de canales por UUID de fuente en Caches, bajo `es.maciptv/channel-snapshots`. Como las URLs pueden contener credenciales, el archivo usa AES-GCM con clave de 256 bits en el Llavero; los permisos del directorio/archivo son 0700/0600. No es una caché de vídeo ni de fotogramas. Una huella SHA-256 de `SavedSource` impide reutilizarla si cambian configuración, permisos de red o bookmark. Al eliminar una fuente se elimina su instantánea.
+
+Al restaurar una fuente existente, AppStore intenta publicar primero sus canales cacheados y reanudar el último canal si está habilitado. Después actualiza la lista y la guía. `SourceImporter.importSource` ofrece `onChannelsLoaded`: se ejecuta tras analizar y validar la lista, antes de descargar XMLTV. La espera de la guía ya no bloquea la publicación de canales ni el inicio de reproducción. Cancelación y generación protegen también estos callbacks. Una instantánea no debe podar favoritos ni anunciar una actualización reciente ficticia. Si el Llavero o la caché no están disponibles, se conserva la ruta normal de importación.
+
+### Entrega progresiva HLS y diagnóstico de arranque
+
+Al comparar el código con AndroIPTV se confirmó que ambas apps convierten rutas Xtream TS conocidas a HLS, pero el relay de Mac esperaba a descargar cada segmento completo. Ahora los recursos de tipo segmento solicitados por GET usan `SecureHTTPClient.stream`: entregan bloques de 32 KiB mediante AsyncBytes y respuesta HTTP local chunked, con contrapresión. Manifiestos, claves y HEAD mantienen el recorrido acotado anterior. Se conservan el gateway de IP comprobadas, validación de redirecciones, límite de ocho saltos, límites de bytes, concurrencia y cancelación al cerrar la conexión. Si falla una transmisión ya iniciada se cierra el socket; no se añade una segunda respuesta HTTP al cuerpo.
+
+Al recibir readyToPlay se llama a `playImmediately(atRate: 1)` si no hay pausa voluntaria. Se conserva la espera automática de AVPlayer para interrupciones posteriores. No hay una espera fija de diez segundos programada antes de reproducir. Las esperas de recuperación de 2/4/8 segundos y los plazos de red tienen otras funciones y no deben confundirse con esa congelación inicial.
+
+El diagnóstico incluye transiciones de transporte y, durante los primeros 15 ticks, muestreo con AVPlayerItemVideoOutput: `videoTime` registra la marca de presentación de un fotograma nuevo, o unknown si aún no se ha obtenido. Se registra el estado cada segundo al principio y después cada cinco. Solo se guardan métricas; no imágenes ni URLs. La medición observó casos con reloj avanzando alrededor de los dos segundos y fotogramas nuevos bastante después, aunque ya había datos suficientes. Esto no identifica por sí solo una causa universal de decodificación/sincronización. No se dejó el experimento de recrear AVPlayer en cada cambio de canal.
+
+Tras probar esta versión, el propietario confirmó que el inicio va mucho mejor y parece resuelto; algún canal todavía puede tardar. Es una validación manual del conjunto de cambios, no una garantía de inicio instantáneo ni una atribución demostrada a una única modificación. Una recompilación con firma ad hoc puede volver a requerir autorización del Llavero; no borrar fuentes para resolverlo.
+
+### Comprobaciones de esta actualización
+
+Se añaden pruebas de caché cifrada, correspondencia con la fuente, persistencia y borrado, publicación de canales antes de la guía, migración del catálogo y entrega progresiva. Los fixtures retienen la segunda mitad de una respuesta hasta verificar que ya llegó la primera; se comprueba tanto el cliente HTTP como el relay completo. También se verifican límites de tamaño y bloqueo de redirecciones a servicios locales no autorizados.
+
+La suite completa ejecutada el 15 de octubre terminó con **126 tests y cero fallos**. La compilación de producción y la verificación de firma terminaron correctamente. Las pruebas de sockets locales deben ejecutarse con permisos que permitan escuchar en loopback: un fallo Operation not permitted del sandbox del agente no demuestra un fallo de la app. Los artefactos `dist/` y los datos personales siguen excluidos de Git.

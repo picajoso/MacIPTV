@@ -7,85 +7,132 @@ import MacIPTVCore
 /// Asistente para configurar la fuente: M3U (URL o archivo) o Xtream.
 struct SourceSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppStore.self) private var store
     @ObservedObject var viewModel: SourceFormModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Picker("Tipo de fuente", selection: $viewModel.kind) {
-                Text("Lista M3U").tag(SourceFormModel.Kind.m3uURL)
-                Text("Archivo M3U").tag(SourceFormModel.Kind.m3uFile)
-                Text("Servidor Xtream").tag(SourceFormModel.Kind.xtream)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("PROVEEDOR").font(Archivo.font(10, weight: .semibold)).tracking(1.4)
+                .foregroundStyle(Theme.accentText)
+            Text("Configurar fuente").font(Archivo.font(22, weight: .heavy))
+                .padding(.top, 5).padding(.bottom, 22)
+            Text("Tipo de fuente").font(Archivo.font(12)).foregroundStyle(Theme.muted)
+                .padding(.bottom, 7)
+            HStack(spacing: 0) {
+                sourceKind("Lista M3U", .m3uURL)
+                sourceKind("Archivo M3U", .m3uFile)
+                sourceKind("Servidor Xtream", .xtream)
             }
-            .pickerStyle(.segmented)
+            .overlay { Rectangle().stroke(Theme.divider, lineWidth: 1) }
+            .padding(.bottom, 20)
 
             switch viewModel.kind {
             case .m3uURL:
-                TextField("URL de la lista (https://...)", text: $viewModel.m3uURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+                sourceField("URL de la lista", placeholder: "https://…", text: $viewModel.m3uURL)
                 xmltvField
             case .m3uFile:
-                HStack {
-                    TextField("Ruta del archivo .m3u", text: $viewModel.m3uPath)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Elegir...") { viewModel.pickFile() }
+                Text("Archivo de lista").font(Archivo.font(12)).foregroundStyle(Theme.muted)
+                    .padding(.bottom, 7)
+                HStack(spacing: 0) {
+                    inputField("Ruta del archivo .m3u", text: $viewModel.m3uPath)
+                    Button("Elegir…") { viewModel.pickFile() }
+                        .font(Archivo.font(12.5, weight: .semibold))
+                        .frame(width: 82, height: 36)
+                        .background(Theme.chip)
+                        .overlay { Rectangle().stroke(Theme.divider, lineWidth: 1) }
                 }
+                .padding(.bottom, 14)
                 xmltvField
             case .xtream:
-                TextField("Direccion del servidor (host o host:puerto)", text: $viewModel.xtreamBase)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                TextField("Usuario", text: $viewModel.xtreamUser)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("Contrasena", text: $viewModel.xtreamPass)
-                    .textFieldStyle(.roundedBorder)
-                Text("La programacion (XMLTV) se obtiene automaticamente del propio servidor.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                sourceField("Dirección del servidor", placeholder: "host o host:puerto", text: $viewModel.xtreamBase)
+                sourceField("Usuario", placeholder: "Usuario", text: $viewModel.xtreamUser)
+                Text("Contraseña").font(Archivo.font(12)).foregroundStyle(Theme.muted)
+                    .padding(.bottom, 7)
+                SecureField("Contraseña", text: $viewModel.xtreamPass)
+                    .textFieldStyle(.plain).font(Archivo.font(13.5))
+                    .padding(.horizontal, 10).frame(height: 36)
+                    .background(Theme.surface)
+                    .overlay { Rectangle().stroke(Theme.divider, lineWidth: 1) }
+                Text("La programación (XMLTV) se obtiene automáticamente del propio servidor.")
+                    .font(Archivo.font(11.5)).foregroundStyle(Theme.muted).padding(.top, 7)
             }
-
-            Toggle("Permitir HTTP sin cifrar para esta fuente", isOn: $viewModel.allowHTTP)
+            Button { viewModel.allowHTTP.toggle() } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Rectangle().fill(viewModel.allowHTTP ? Theme.accent : Theme.surface)
+                        Rectangle().stroke(viewModel.allowHTTP ? Theme.accent : Theme.divider, lineWidth: 1)
+                        if viewModel.allowHTTP { LucideIcon(name: "check", size: 13).foregroundStyle(.white) }
+                    }.frame(width: 18, height: 18)
+                    Text("Permitir HTTP sin cifrar para esta fuente")
+                        .font(Archivo.font(12.5)).foregroundStyle(Theme.fg)
+                }
+            }
+            .buttonStyle(.plain).padding(.top, 22).padding(.bottom, 9)
             if viewModel.allowHTTP {
                 Text("HTTP puede exponer tu suscripción a quien intercepte la conexión. Usa HTTPS si tu proveedor lo admite.")
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(Archivo.font(11.5)).foregroundStyle(Theme.accentText)
+                    .padding(.bottom, 10)
             }
-            TextField("URL con IP del servidor local autorizado (opcional)", text: $viewModel.localServer)
-                .textFieldStyle(.roundedBorder)
-            Text("Déjalo vacío para bloquear accesos a otros servicios de tu ordenador y tu red. Autoriza solo tu servidor IPTV local.")
-                .font(.caption).foregroundStyle(.secondary)
+            sourceField("Servidor local autorizado (opcional)", placeholder: "http://192.168.1.10:8080",
+                        text: $viewModel.localServer)
+            Text("Déjalo vacío para bloquear la red local. Autoriza solo una IP y un puerto de confianza.")
+                .font(Archivo.font(11.5)).foregroundStyle(Theme.muted)
 
             if let error = viewModel.validationError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                HStack(spacing: 8) { LucideIcon(name: "triangle-alert", size: 15); Text(error) }
+                    .font(Archivo.font(12.5)).foregroundStyle(Theme.accentText).padding(.top, 12)
             }
             if viewModel.loading {
-                ProgressView("Cargando canales...")
+                ProgressView("Cargando canales…").padding(.top, 12)
             }
-
-            HStack {
-                Spacer()
-                Button("Cancelar") { dismiss() }
-                    .disabled(viewModel.loading)
+            Spacer(minLength: 16)
+            HStack(spacing: 0) {
+                Button("Cancelar") { dismiss() }.disabled(viewModel.loading)
+                    .frame(maxWidth: .infinity).frame(height: 52)
+                    .background(Theme.surface)
+                    .keyboardShortcut(.cancelAction)
                 Button("Conectar") {
                     if viewModel.submit(store: store) { dismiss() }
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(viewModel.loading)
+                .frame(maxWidth: .infinity).frame(height: 52)
+                .background(Theme.accent).foregroundStyle(Theme.onRed)
+                .keyboardShortcut(.defaultAction).disabled(viewModel.loading)
             }
+            .buttonStyle(.plain).font(Archivo.font(13, weight: .heavy))
         }
-        .padding(20)
-        .frame(width: 480)
+        .padding(24)
+        .frame(width: 540, height: 580)
+        .background(Theme.bg).foregroundStyle(Theme.fg)
         .onAppear { viewModel.restore(from: store) }
     }
 
     private var xmltvField: some View {
-        TextField("URL XMLTV opcional (programacion)", text: $viewModel.xmltvURL)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(.body, design: .monospaced))
+        sourceField("URL XMLTV (opcional)", placeholder: "https://…", text: $viewModel.xmltvURL)
     }
 
-    @Environment(AppStore.self) private var store
+    private func sourceKind(_ title: String, _ kind: SourceFormModel.Kind) -> some View {
+        Button { viewModel.kind = kind } label: {
+            Text(title).font(Archivo.font(12.5, weight: .semibold))
+                .frame(maxWidth: .infinity).frame(height: 38)
+                .background(viewModel.kind == kind ? Theme.accent : Theme.surface)
+                .foregroundStyle(viewModel.kind == kind ? Theme.onRed : Theme.fg)
+        }.buttonStyle(.plain)
+    }
+
+    private func sourceField(_ label: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label).font(Archivo.font(12)).foregroundStyle(Theme.muted)
+            inputField(placeholder, text: text)
+        }.padding(.bottom, 14)
+    }
+
+    private func inputField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain).font(Archivo.font(13.5))
+            .padding(.horizontal, 10).frame(height: 36)
+            .background(Theme.surface)
+            .overlay { Rectangle().stroke(Theme.divider, lineWidth: 1) }
+    }
 }
 
 /// Contenedor de la hoja: mantiene el modelo del formulario vivo durante toda

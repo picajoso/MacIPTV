@@ -6,6 +6,36 @@ final class HLSRelaySecurityTests: XCTestCase {
     private let upstream = URL(string: "https://example.test/live.m3u8")!
     private let local = URL(string: "http://127.0.0.1:1234/private/")!
 
+    func testRelayStreamsSegmentBeforeUpstreamFinishes() async throws {
+        let fixture = SecurityHTTPFixture()
+        let source = try await fixture.start()
+        await fixture.configure(.body(Data("#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nmedia.ts\n".utf8)))
+        let relay = HLSRelay(policy: NetworkPolicy(allowHTTP: true, localEndpoints: [NetworkPolicy.endpointKey(host: "127.0.0.1", port: UInt16(source.port!))]))
+        let local = try await relay.start(upstream: source)
+        let session = URLSession(configuration: .ephemeral)
+        let (manifest, _) = try await session.data(from: local)
+        let segment = try XCTUnwrap(String(decoding: manifest, as: UTF8.self).components(separatedBy: .newlines).first { $0.hasPrefix("http://") }.flatMap(URL.init(string:)))
+        let prefix = Data(repeating: 65, count: 32768), suffix = Data(repeating: 66, count: 32768)
+        await fixture.configure(.split(prefix, suffix))
+        let first = expectation(description: "Relay sends segment before upstream completes")
+        let download = Task {
+            let (bytes, response) = try await session.bytes(from: segment)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            var received = Data()
+            for try await byte in bytes {
+                received.append(byte)
+                if received.count == prefix.count { first.fulfill() }
+            }
+            return received
+        }
+        await fulfillment(of: [first], timeout: 3)
+        await fixture.releaseTail()
+        let received = try await download.value
+        XCTAssertEqual(received, prefix + suffix)
+        session.invalidateAndCancel()
+        await relay.stop(); await fixture.stop()
+    }
+
     func testManifestCannotExposeFileOrPrivateNetworkReferences() {
         for resource in ["file:///tmp/private", "http://127.0.0.1:9000/private", "https://192.168.1.1/admin"] {
             var registry = HLSRelayRegistry()

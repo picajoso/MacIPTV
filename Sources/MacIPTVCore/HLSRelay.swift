@@ -102,6 +102,21 @@ public actor HLSRelay {
             }
             let started = ProcessInfo.processInfo.systemUptime
             let maximum = kind == .segment ? DownloadLimits.segment : (kind == .key ? DownloadLimits.key : DownloadLimits.manifest)
+            if kind == .segment, first[0] == "GET" {
+                let download = Task { try await self.streamSegment(request, client: client, connection: connection) }
+                downloads[id] = download
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in download.cancel() }
+                // Once headers have been sent, failures must close the socket,
+                // never append a second HTTP response to the segment body.
+                do { _ = try await download.value }
+                catch {
+                    if (error as? IPTVError) == .httpConsentRequired { await onHTTPConsentRequired?() }
+                    if !(error is CancellationError), (error as? URLError)?.code != .cancelled {
+                        DiagnosticLog.record(.playback, error: error)
+                    }
+                }
+                return
+            }
             let download = Task { try await client.fetch(request, maximumBytes: maximum) }
             downloads[id] = download
             // One request per socket, Connection: close. EOF, failure or further
@@ -143,6 +158,31 @@ public actor HLSRelay {
             }
             try? await respond(connection, status: 502)
         }
+    }
+
+    private func streamSegment(_ request: URLRequest, client: SecureHTTPClient, connection: NWConnection) async throws -> HTTPResult {
+        let started = ProcessInfo.processInfo.systemUptime
+        let result = try await client.stream(request, maximumBytes: DownloadLimits.segment, onResponse: { response in
+            var header = "HTTP/1.1 \(response.statusCode) Response\r\nCache-Control: no-store\r\nConnection: close\r\n"
+            if (200..<300).contains(response.statusCode) {
+                header += "Content-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n"
+                if let range = response.value(forHTTPHeaderField: "Content-Range"),
+                   range.range(of: "^bytes [0-9]+-[0-9]+/[0-9*]+$", options: .regularExpression) != nil {
+                    header += "Content-Range: \(range)\r\n"
+                }
+            } else { header += "Content-Length: 0\r\n" }
+            try await SocketIO.send(Data((header + "\r\n").utf8), to: connection)
+        }, onChunk: { chunk in
+            var packet = Data("\(String(chunk.count, radix: 16))\r\n".utf8)
+            packet.append(chunk); packet.append(Data("\r\n".utf8))
+            try await SocketIO.send(packet, to: connection)
+        })
+        if (200..<300).contains(result.response.statusCode) {
+            try await SocketIO.send(Data("0\r\n\r\n".utf8), to: connection)
+        }
+        DiagnosticLog.recordHLS(kind: .segment, status: result.response.statusCode, bytes: result.byteCount,
+                                elapsed: ProcessInfo.processInfo.systemUptime - started)
+        return HTTPResult(data: Data(), response: result.response)
     }
 
     private func receive(_ connection: NWConnection) async throws -> Data {
