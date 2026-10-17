@@ -180,6 +180,8 @@ El ajuste conserva el fotograma completo y aprovecha una dimensión del área di
 
 `AppStore.videoOnly` (solo en memoria) muestra el vídeo a toda la ventana sin cambiar a la pantalla completa del sistema: oculta cabecera, paneles, Ahora/Después, acciones y barra de estado, y reutiliza los controles superpuestos y el cajón de canales de pantalla completa. Se activa con ⇧⌘F (menú Visualización) o el botón de monitor de los controles del reproductor; Esc, la flecha o el botón de minimizar lo cierran, y pasar a Guía también. Una franja superior permite mover la ventana y los controles dejan sitio a los botones de ventana. El modo rellenar también se aplica aquí, porque es una vista inmersiva elegida por el usuario.
 
+Los controles superpuestos se ocultan con opacidad, pero el anillo de foco de los controles AppKit (por ejemplo, el deslizador de volumen) no hereda esa opacidad y quedaba visible sobre el vídeo. Los deslizadores usan `.focusEffectDisabled(!controlsVisible)`: conservan el indicador de foco mientras los controles están visibles y lo pierden al ocultarse. Cualquier control enfocable nuevo del overlay necesita el mismo tratamiento.
+
 ### Restauración rápida y guía en segundo plano
 
 `Channel` es Codable. `ChannelCache` guarda instantáneas de canales por UUID de fuente en Caches, bajo `es.maciptv/channel-snapshots`. Como las URLs pueden contener credenciales, el archivo usa AES-GCM con clave de 256 bits en el Llavero; los permisos del directorio/archivo son 0700/0600. No es una caché de vídeo ni de fotogramas. Una huella SHA-256 de `SavedSource` impide reutilizarla si cambian configuración, permisos de red o bookmark. Al eliminar una fuente se elimina su instantánea.

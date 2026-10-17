@@ -192,6 +192,8 @@ struct PlayerView: View {
             .accessibilityLabel(isMuted ? "Activar sonido" : "Silenciar")
             Slider(value: $volume, in: 0...1)
                 .frame(width: 90)
+                // El anillo de foco de AppKit no hereda la opacidad de SwiftUI.
+                .focusEffectDisabled(!controlsVisible)
                 .accessibilityLabel("Volumen")
                 .onChange(of: volume) { _, value in player.volume = Float(value) }
             Spacer()
@@ -333,6 +335,7 @@ struct PlayerView: View {
                 } label: { LucideIcon(name: isMuted ? "volume-x" : "volume-2", size: 19) }
                 .accessibilityLabel(isMuted ? "Activar sonido" : "Silenciar")
                 Slider(value: $volume, in: 0...1).frame(width: 110).accessibilityLabel("Volumen")
+                    .focusEffectDisabled(!controlsVisible)
                     .onChange(of: volume) { _, value in player.volume = Float(value) }
                 Spacer()
                 Button(action: onFavorite) { LucideIcon(name: "heart", size: 19) }
