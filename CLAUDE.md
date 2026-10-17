@@ -182,6 +182,10 @@ El ajuste conserva el fotograma completo y aprovecha una dimensión del área di
 
 Los controles superpuestos se ocultan con opacidad, pero el anillo de foco de los controles AppKit (por ejemplo, el deslizador de volumen) no hereda esa opacidad y quedaba visible sobre el vídeo. Los deslizadores usan `.focusEffectDisabled(!controlsVisible)`: conservan el indicador de foco mientras los controles están visibles y lo pierden al ocultarse. Cualquier control enfocable nuevo del overlay necesita el mismo tratamiento.
 
+En los modos inmersivos (pantalla completa y solo vídeo), el degradado negro superior/inferior que da contraste a los controles también depende de `controlsVisible`. Antes se mantenía siempre y oscurecía los bordes del vídeo con los controles ocultos, como una viñeta. Cualquier fondo o sombra nuevo del overlay debe ocultarse con los controles.
+
+Para probar un cambio de interfaz hay que regenerar `dist/MacIPTV.app` con `scripts/build-app.sh` y cerrar la app con ⌘Q. `swift build` no actualiza el bundle, y reabrirlo sin recompilar ejecuta el binario anterior.
+
 ### Restauración rápida y guía en segundo plano
 
 `Channel` es Codable. `ChannelCache` guarda instantáneas de canales por UUID de fuente en Caches, bajo `es.maciptv/channel-snapshots`. Como las URLs pueden contener credenciales, el archivo usa AES-GCM con clave de 256 bits en el Llavero; los permisos del directorio/archivo son 0700/0600. No es una caché de vídeo ni de fotogramas. Una huella SHA-256 de `SavedSource` impide reutilizarla si cambian configuración, permisos de red o bookmark. Al eliminar una fuente se elimina su instantánea.

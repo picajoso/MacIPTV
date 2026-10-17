@@ -87,8 +87,11 @@ struct PlayerView: View {
         }
         .overlay {
             if isFullScreen {
+                // El degradado solo da contraste a los controles; se oculta
+                // con ellos para no oscurecer el vídeo.
                 LinearGradient(colors: [.black.opacity(0.7), .clear, .clear, .black.opacity(0.85)],
                                startPoint: .top, endPoint: .bottom)
+                    .opacity(controlsVisible ? 1 : 0)
                     .allowsHitTesting(false)
             }
         }
