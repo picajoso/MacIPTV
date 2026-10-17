@@ -19,31 +19,35 @@ struct ContentView: View {
         let app: String
     }
 
+    /// Pantalla completa del sistema o modo solo vídeo dentro de la ventana:
+    /// ambos ocultan paneles y usan los controles superpuestos.
+    private var immersive: Bool { isFullScreen || store.videoOnly }
+
     var body: some View {
         @Bindable var store = store
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                if !isFullScreen {
+                if !immersive {
                     titleBar
                     Rectangle().fill(Theme.divider).frame(height: 2)
                 }
                 HStack(spacing: 0) {
-                    if store.showGroups && !isFullScreen {
+                    if store.showGroups && !immersive {
                         sidebar.frame(width: 229)
                         Rectangle().fill(Theme.divider).frame(width: 2)
                     }
                     ZStack {
                         HStack(spacing: 0) {
-                            if store.showChannels && store.tab == .live && !isFullScreen {
+                            if store.showChannels && store.tab == .live && !immersive {
                                 ChannelListView(onExternal: requestExternal, onFullScreen: enterFullScreen)
                                     .frame(width: 329)
                                 Rectangle().fill(Theme.divider).frame(width: 2)
                             }
                             videoColumn
                         }
-                        .opacity(store.tab == .guide && !isFullScreen ? 0 : 1)
-                        .allowsHitTesting(store.tab != .guide || isFullScreen)
-                        if store.tab == .guide && !isFullScreen, let guide = store.guide {
+                        .opacity(store.tab == .guide && !immersive ? 0 : 1)
+                        .allowsHitTesting(store.tab != .guide || immersive)
+                        if store.tab == .guide && !immersive, let guide = store.guide {
                             GuideView(channels: store.visibleChannels, guide: guide) { channel in
                                 store.selectedChannelID = channel.id
                                 store.tab = .live
@@ -51,10 +55,10 @@ struct ContentView: View {
                         }
                     }
                 }
-                if !isFullScreen { statusBar }
+                if !immersive { statusBar }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .background(isFullScreen ? Color.black : Theme.bg)
+            .background(immersive ? Color.black : Theme.bg)
             .foregroundStyle(Theme.fg)
         }
         .ignoresSafeArea(edges: .top)
@@ -98,14 +102,16 @@ struct ContentView: View {
             fullScreenDrawerOpen = false
         }
         .onExitCommand {
-            if isFullScreen { enterFullScreen() }
+            if isFullScreen { enterFullScreen() } else if store.videoOnly { store.videoOnly = false }
         }
+        .onChange(of: store.tab) { _, tab in if tab == .guide { store.videoOnly = false } }
+        .onChange(of: store.videoOnly) { _, value in if !value && !isFullScreen { fullScreenDrawerOpen = false } }
         .overlay(alignment: .bottom) {
             if let notice = store.notice {
                 Text(notice).font(Archivo.font(13, weight: .semibold))
                     .padding(.horizontal, 18).padding(.vertical, 11)
                     .background(Theme.fg).foregroundStyle(Theme.bg)
-                    .padding(.bottom, isFullScreen ? 70 : 30)
+                    .padding(.bottom, immersive ? 70 : 30)
                     .allowsHitTesting(false)
             }
         }
@@ -309,15 +315,16 @@ struct ContentView: View {
             let minimumHeight = min(150, max(100, geometry.size.height - 140))
             let maximumHeight = max(minimumHeight, geometry.size.height - 24 - 120)
             let requestedHeight = previewDragHeight ?? (store.previewHeight > 0 ? CGFloat(store.previewHeight) : naturalHeight)
-            let playerHeight = isFullScreen
+            let playerHeight = immersive
                 ? geometry.size.height
                 : min(max(requestedHeight, minimumHeight), maximumHeight)
             VStack(spacing: 0) {
                 PlayerView(channel: store.selectedChannel,
                            programme: store.selectedChannel.flatMap { store.nowPlaying($0) },
                            programmeEnd: store.selectedChannel.flatMap { store.nowPlaying($0) }.flatMap { store.guide?.effectiveEnd(of: $0) },
-                           isFullScreen: isFullScreen,
-                           fillVideo: isFullScreen && store.fillVideo,
+                           isFullScreen: immersive,
+                           isVideoOnly: store.videoOnly && !isFullScreen,
+                           fillVideo: immersive && store.fillVideo,
                            hideControlsAfter: store.hideControlsAfter,
                            isFavorite: store.selectedChannelID.map { store.favorites.contains($0) } ?? false,
                            previousChannelName: store.previousVisibleChannel.map { ChannelName($0.name).title },
@@ -327,6 +334,7 @@ struct ContentView: View {
                            onFavorite: { if let id = store.selectedChannelID { store.toggleFavorite(id) } },
                            onToggleFill: { store.fillVideo.toggle() },
                            onToggleDrawer: { fullScreenDrawerOpen.toggle() },
+                           onToggleVideoOnly: { store.videoOnly.toggle() },
                            onExternal: { if let channel = store.selectedChannel { requestExternal(channel, store.externalPlayer) } },
                            networkPolicy: store.networkPolicy,
                            sourceID: store.activeSourceID,
@@ -341,7 +349,7 @@ struct ContentView: View {
                         default: break
                         }
                     }
-                if !isFullScreen {
+                if !immersive {
                     if store.tab == .live {
                         PreviewResizeControl(
                             onDecrease: { store.previewHeight = Double(max(minimumHeight, playerHeight - 36)) },
@@ -372,7 +380,11 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .trailing) {
-                if isFullScreen && fullScreenDrawerOpen { fullScreenDrawer }
+                if immersive && fullScreenDrawerOpen { fullScreenDrawer }
+            }
+            .overlay(alignment: .top) {
+                // Sin barra de título, esta franja permite mover la ventana.
+                if store.videoOnly && !isFullScreen { WindowDragRegion().frame(height: 28) }
             }
         }
     }

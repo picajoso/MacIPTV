@@ -61,6 +61,8 @@ final class AppStore {
     var favorites: Set<String> = []
     var tab: MainTab = .live
     var showSettings = false
+    /// Vídeo a toda la ventana sin paneles; solo en memoria, no se persiste.
+    var videoOnly = false
     var searchRequestID = UUID()
     var externalRequestApp: String?
     var confirmRemoveSource = false

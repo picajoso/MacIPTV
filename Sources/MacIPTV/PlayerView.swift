@@ -20,6 +20,9 @@ struct PlayerView: View {
     var programme: Programme? = nil
     var programmeEnd: Date? = nil
     var isFullScreen = false
+    /// Modo solo vídeo en ventana: mismos controles, pero salir no cambia
+    /// la pantalla completa del sistema y se respetan los botones de ventana.
+    var isVideoOnly = false
     var fillVideo = true
     var hideControlsAfter = 3
     var isFavorite = false
@@ -30,6 +33,7 @@ struct PlayerView: View {
     var onFavorite: () -> Void = {}
     var onToggleFill: () -> Void = {}
     var onToggleDrawer: () -> Void = {}
+    var onToggleVideoOnly: () -> Void = {}
     var onExternal: () -> Void = {}
     var networkPolicy = NetworkPolicy()
     var sourceID: UUID?
@@ -209,6 +213,11 @@ struct PlayerView: View {
                     Text(end, format: .dateTime.hour().minute()).font(Archivo.font(10))
                 }
             }
+            Button(action: onToggleVideoOnly) {
+                LucideIcon(name: "monitor", size: 18)
+            }
+            .help("Solo vídeo (⇧⌘F)")
+            .accessibilityLabel("Solo vídeo")
             Button {
                 (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
             } label: {
@@ -225,11 +234,11 @@ struct PlayerView: View {
 
     private var fullScreenTop: some View {
         HStack(alignment: .top, spacing: 12) {
-            Button { (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil) } label: {
+            Button(action: exitImmersive) {
                 LucideIcon(name: "arrow-left", size: 21).frame(width: 44, height: 44)
             }
-            .accessibilityLabel("Salir de pantalla completa")
-            .help("Salir de pantalla completa (Esc)")
+            .accessibilityLabel(exitImmersiveTitle)
+            .help("\(exitImmersiveTitle) (Esc)")
             fullScreenHeading
             Spacer()
             Button(action: onToggleDrawer) {
@@ -243,7 +252,15 @@ struct PlayerView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.white)
         .padding(.horizontal, 28)
-        .padding(.top, 18)
+        .padding(.top, isVideoOnly ? 40 : 18)
+    }
+
+    private var exitImmersiveTitle: String {
+        isVideoOnly ? "Salir de solo vídeo" : "Salir de pantalla completa"
+    }
+
+    private func exitImmersive() {
+        if isVideoOnly { onToggleVideoOnly() } else { (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil) }
     }
 
     private var fullScreenHeading: some View {
@@ -324,11 +341,18 @@ struct PlayerView: View {
                 Button(action: onToggleFill) { Text(fillVideo ? "Ajustar" : "Rellenar") }
                     .help("Ajustar o rellenar imagen")
                 Button("VLC", action: onExternal).help("Abrir en VLC")
-                Button { (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil) } label: {
+                if isVideoOnly {
+                    Button { (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil) } label: {
+                        LucideIcon(name: "maximize-2", size: 19)
+                    }
+                    .accessibilityLabel("Pantalla completa")
+                    .help("Pantalla completa (⌘F)")
+                }
+                Button(action: exitImmersive) {
                     LucideIcon(name: "minimize-2", size: 19)
                 }
-                .accessibilityLabel("Salir de pantalla completa")
-                .help("Salir de pantalla completa (Esc)")
+                .accessibilityLabel(exitImmersiveTitle)
+                .help("\(exitImmersiveTitle) (Esc)")
             }
             .font(Archivo.font(12.5, weight: .semibold))
             .frame(height: 44)

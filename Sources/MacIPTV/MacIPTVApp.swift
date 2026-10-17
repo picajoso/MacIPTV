@@ -63,7 +63,12 @@ struct MacIPTVApp: App {
                 Button("Pantalla completa") {
                     (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
                 }.keyboardShortcut("f", modifiers: .command)
-                Button("Rellenar en pantalla completa") { store.fillVideo.toggle() }
+                Button(store.videoOnly ? "Salir de solo vídeo" : "Solo vídeo") {
+                    store.tab = .live
+                    store.videoOnly.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.shift, .command])
+                Button("Rellenar en pantalla completa o solo vídeo") { store.fillVideo.toggle() }
                 Divider()
                 ForEach(AppearancePreference.allCases) { appearance in
                     Button((store.appearance == appearance ? "✓ " : "") + appearance.title) {

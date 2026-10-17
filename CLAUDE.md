@@ -172,9 +172,13 @@ La gestión de fuentes permite mantener un catálogo en el Llavero, activar o el
 
 El divisor horizontal entre vídeo y Ahora/Después se puede arrastrar en Directo con cero, uno o dos paneles laterales visibles. Su control aparece al pasar el puntero por la zona o mientras se arrastra. No debe quedar un botón permanentemente visible.
 
-La previsualización utiliza siempre ajuste proporcional (`resizeAspect`) y un rectángulo explícito que sigue el tamaño disponible. El modo rellenar se limita a pantalla completa y puede recortar allí. `PlayerSurface` deja que AppKit gestione la capa raíz y aloja AVPlayerLayer como subcapa; en `layout()` actualiza su frame a `bounds` sin animaciones implícitas. No volver a alternar automáticamente entre ajustar y rellenar según la altura: produjo recortes y saltos durante el arrastre.
+La previsualización utiliza siempre ajuste proporcional (`resizeAspect`) y un rectángulo explícito que sigue el tamaño disponible. El modo rellenar se limita a pantalla completa y al modo solo vídeo, y puede recortar allí. `PlayerSurface` deja que AppKit gestione la capa raíz y aloja AVPlayerLayer como subcapa; en `layout()` actualiza su frame a `bounds` sin animaciones implícitas. No volver a alternar automáticamente entre ajustar y rellenar según la altura: produjo recortes y saltos durante el arrastre.
 
 El ajuste conserva el fotograma completo y aprovecha una dimensión del área disponible. Puede haber bandas por diferencia de proporciones; las bandas negras ya codificadas por el emisor también forman parte del fotograma y no se eliminan automáticamente.
+
+### Modo solo vídeo
+
+`AppStore.videoOnly` (solo en memoria) muestra el vídeo a toda la ventana sin cambiar a la pantalla completa del sistema: oculta cabecera, paneles, Ahora/Después, acciones y barra de estado, y reutiliza los controles superpuestos y el cajón de canales de pantalla completa. Se activa con ⇧⌘F (menú Visualización) o el botón de monitor de los controles del reproductor; Esc, la flecha o el botón de minimizar lo cierran, y pasar a Guía también. Una franja superior permite mover la ventana y los controles dejan sitio a los botones de ventana. El modo rellenar también se aplica aquí, porque es una vista inmersiva elegida por el usuario.
 
 ### Restauración rápida y guía en segundo plano
 
